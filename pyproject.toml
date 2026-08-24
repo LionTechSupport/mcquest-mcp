@@ -1,0 +1,15 @@
+[project]
+name = "mcquest-mcp"
+version = "0.2.0"
+description = "Read-only MCP server for the MCQuest codebase"
+requires-python = ">=3.10"
+dependencies = [
+    "mcp[cli]>=2,<3",
+]
+
+[project.scripts]
+mcquest-mcp = "mcquest_mcp.server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
