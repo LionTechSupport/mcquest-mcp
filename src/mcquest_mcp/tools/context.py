@@ -141,7 +141,7 @@ def find_evidence(
         cr, cc = _search_source_files(regex, path, phase, max_results, context_lines)
         total_matches += cc
         parts.extend(cr) if cr else parts.append("  (no matches)")
-    if scope in ("docs", "all"):
+    if scope in ("docs", "phase", "all"):
         parts.append("\n## DOCUMENTATION EVIDENCE")
         dr, dc = _search_doc_files(regex, docs_path, phase, max_results, context_lines)
         total_matches += dc

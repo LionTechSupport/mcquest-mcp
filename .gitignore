@@ -1,0 +1,28 @@
+# --- Python bytecode / caches ---
+__pycache__/
+*.py[cod]
+*$py.class
+
+# --- Virtual environments (live in the repo dir) ---
+.venv/
+venv/
+env/
+
+# --- Test / tool caches ---
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+.cline
+
+# --- Build / packaging ---
+dist/
+build/
+*.egg-info/
+
+# --- Editor / OS (adjust to taste) ---
+.idea/
+.DS_Store
+Thumbs.db

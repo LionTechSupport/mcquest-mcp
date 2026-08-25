@@ -1,27 +1,9 @@
-from .tools.audit import pattern_audit
-from .tools.context import find_evidence, project_context
-from .tools.docs import compare_phase, list_docs, phase_context, read_doc, search_docs
-from .tools.files import find_files, list_files, read_file
-from .tools.git_context import git_context
-from .tools.imports import find_imports, find_usages
-from .tools.project import project_info
-from .tools.search import search_text
+"""``mcquest-mcp`` package.
 
-__all__ = [
-    "project_info",
-    "list_files",
-    "read_file",
-    "search_text",
-    "find_files",
-    "find_imports",
-    "find_usages",
-    "pattern_audit",
-    "list_docs",
-    "read_doc",
-    "search_docs",
-    "phase_context",
-    "project_context",
-    "find_evidence",
-    "git_context",
-    "compare_phase",
-]
+The 16-tool MCP surface is registered in :mod:`mcquest_mcp.server` via the
+``@mcp.tool()`` decorators, not re-exported here. This package intentionally
+does **no** eager imports so that the ``mcquest-mcp --project`` bootstrap in
+:mod:`mcquest_mcp.cli` can decide the target project root and set the
+``MCQUEST_PROJECT_ROOT`` environment variable *before* the server -- and the
+root-freezing ``mcquest_mcp.config`` it imports -- is loaded.
+"""

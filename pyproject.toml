@@ -8,7 +8,10 @@ dependencies = [
 ]
 
 [project.scripts]
-mcquest-mcp = "mcquest_mcp.server:main"
+mcquest-mcp = "mcquest_mcp.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8,<9"]
 
 [build-system]
 requires = ["hatchling"]

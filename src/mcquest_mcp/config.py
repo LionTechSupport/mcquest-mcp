@@ -4,12 +4,25 @@ import os
 from pathlib import Path
 
 
-DEFAULT_PROJECT_ROOT = Path(
-    os.environ.get(
-        "MCQUEST_PROJECT_ROOT",
-        r"D:\App Development\Education_app\MCQuest",
-    )
-).resolve()
+def _default_project_root() -> Path:
+    """Return the configured project root or fail loudly if none is set.
+
+    ``MCQUEST_PROJECT_ROOT`` is the only source of truth for the root here; the
+    value is established by the ``mcquest-mcp --project`` bootstrap *before* this
+    module is imported. A machine-specific fallback is intentionally avoided so an
+    unconfigured server never silently serves the wrong repository.
+    """
+    raw = os.environ.get("MCQUEST_PROJECT_ROOT")
+    if not raw:
+        raise RuntimeError(
+            "No project root configured. Pass --project <PATH> when launching "
+            "mcquest-mcp, or set the MCQUEST_PROJECT_ROOT environment variable "
+            "to the repository the read-only tools are confined to."
+        )
+    return Path(raw).resolve()
+
+
+DEFAULT_PROJECT_ROOT = _default_project_root()
 
 
 # Directories that should never be exposed through the read-only tools.

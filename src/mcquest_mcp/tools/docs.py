@@ -535,11 +535,11 @@ def compare_phase(
 ) -> str:
     """Compare documentation evidence between two phases.
 
-    Returns differences between phase documentation sets such as
-    documentation changes, new findings, resolved findings.
+    Returns document-set differences using evidence-neutral terminology:
+    EXISTING, ADDED, REMOVED, COMMON, UNKNOWN.
 
-    Uses terminology: EXISTING, RESOLVED, NEW, POTENTIAL REGRESSION,
-    UNKNOWN when appropriate.
+    Document-existence/set diff only; not content verification.
+    RUNTIME VERIFICATION: NOT PERFORMED.
     """
     if not from_phase.strip() or not to_phase.strip():
         raise ValueError("Both from_phase and to_phase are required.")
@@ -583,22 +583,27 @@ def compare_phase(
     common_docs = from_names & to_names
 
     parts.append("\n## SUMMARY")
-    parts.append(f"  NEW documents in {to_phase}: {len(new_docs)}")
+    parts.append(f"  ADDED documents in {to_phase}: {len(new_docs)}")
     parts.append(f"  REMOVED from {from_phase}: {len(removed_docs)}")
     parts.append(f"  COMMON documents: {len(common_docs)}")
-    parts.append(f"  STATUS: EXISTING={len(common_docs)} NEW={len(new_docs)} RESOLVED={len(removed_docs)}")
+    parts.append(
+        f"  STATUS: EXISTING={len(common_docs)} ADDED={len(new_docs)} "
+        f"REMOVED={len(removed_docs)}"
+    )
 
     if new_docs:
-        parts.append(f"\n## NEW in {to_phase}:")
+        parts.append(f"\n## ADDED in {to_phase}:")
         for name in sorted(new_docs):
             parts.append(f"  - {name}")
     if removed_docs:
-        parts.append(f"\n## RESOLVED/REMOVED (present in {from_phase}, absent in {to_phase}):")
+        parts.append(f"\n## REMOVED (present in {from_phase}, absent in {to_phase}):")
         for name in sorted(removed_docs):
             parts.append(f"  - {name}")
 
     parts.append(
-        "\n---\nNOTE: This compares document existence, not content. "
+        "\n---\nSTATUS BASIS: document-existence/set diff only; not content verification.\n"
+        "RUNTIME VERIFICATION: NOT PERFORMED.\n"
+        "NOTE: This compares document existence, not content. "
         "Use mcquest_read_doc to inspect individual documents. "
         "Differences in common documents (content changes) are not detected "
         "by this tool."
