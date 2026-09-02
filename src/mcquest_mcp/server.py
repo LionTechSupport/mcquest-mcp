@@ -7,6 +7,7 @@ from pydantic import Field
 
 from .tools import (
     compare_phase,
+    diagnostics,
     find_evidence,
     find_files,
     find_imports,
@@ -28,18 +29,30 @@ from .tools import (
 mcp = MCPServer(
     "MCQuest Read-Only MCP",
     instructions=(
-        "MCQuest repository intelligence server. "
-        "All tools are strictly read-only. "
-        "Never modify, create, delete, rename, or execute project files. "
-        "Use these tools for deterministic source-code evidence. "
-        "Perform architectural reasoning in the client."
+        "Read-only repository investigation server operating against the selected "
+        "project root (set via --project or MCQUEST_PROJECT_ROOT); that root may "
+        "be any repository, not necessarily MCQuest. All tools are strictly "
+        "read-only: never modify, create, delete, rename, or execute project "
+        "files. When an MCP tool provides the required repository evidence, "
+        "prefer it over an equivalent shell command (e.g. grep, rg, "
+        "Select-String, Get-ChildItem). Use mcquest_search_docs for "
+        "Markdown/documentation searches, mcquest_search for source-code regex "
+        "searches, mcquest_find_files to locate files by name, "
+        "mcquest_read_file / mcquest_read_doc to read known files, and "
+        "mcquest_find_usages / mcquest_find_imports for dependency/reference "
+        "investigation. Use mcquest_diagnostics for TypeScript/TSX/JavaScript/JSX "
+        "parser or compiler diagnostics; when the compiler/parser has already "
+        "identified an error location, use it instead of reading the entire "
+        "large source file. Shell remains acceptable when the MCP does not "
+        "provide the required operation or the operation is outside repository "
+        "investigation. Perform reasoning in the client."
     ),
 )
 
 
 @mcp.tool()
 def mcquest_project_info() -> str:
-    """READ ONLY. Get a compact overview of the MCQuest project structure and important files. Returns project root, top-level directories, and key configuration files. Use this as the first context call before a large investigation."""
+    """READ ONLY. Get a compact overview of the selected project structure and important files. Returns project root, top-level directories, and key configuration files. Use this as the first context call before a large investigation."""
     return project_info()
 
 
@@ -75,15 +88,35 @@ def mcquest_read_file(
 
 
 @mcp.tool()
+def mcquest_diagnostics(
+    path: Annotated[str, Field(description="Project-relative source file to diagnose, e.g. 'src/TeacherDashboard.tsx'. Supported file types: .ts, .tsx, .js, .jsx.")],
+    context_lines: Annotated[int, Field(description="Number of source lines surrounding each diagnostic to include. Bounded to 0-25. Defaults to 12.")] = 12,
+    max_diagnostics: Annotated[int, Field(description="Maximum number of diagnostics to return. Bounded to 1-50. Defaults to 20.")] = 20,
+    line: Annotated[int | None, Field(description="When provided, only diagnostics on this 1-based source line are returned. Useful for focusing on one compiler error location.")] = None,
+    column: Annotated[int | None, Field(description="When provided (usually together with line), only diagnostics at this 1-based source column are returned.")] = None,
+    diagnostic_kind: Annotated[str, Field(description="Kind of diagnostics to return. This version supports only 'syntax'. Defaults to 'syntax'.")] = "syntax",
+) -> str:
+    """READ ONLY. Use this tool when Cline receives or needs to investigate a TypeScript/TSX/JavaScript/JSX parser or compiler diagnostic. Prefer this tool over reading an entire large source file when the problem can be diagnosed from compiler/parser diagnostics plus a small source context window. Returns compact syntax diagnostics (e.g. TS1005 "'}' expected", "')' expected", "']' expected", unexpected token, unterminated string/template, JSX closing-tag problems, malformed generic/type syntax) with exact 1-based line/column, a small number of surrounding source lines, and TypeScript-provided related locations (such as the opening '{' that caused a parser mismatch). Works on large .tsx files without returning the whole file. Uses the selected project's own Node runtime and project-local TypeScript compiler parser (node_modules/typescript); returns "TypeScript compiler unavailable in selected project." when the project has no TypeScript installation. Strictly read-only: never modifies files and never executes application code. Use this instead of reading the entire source file when the compiler/parser has already identified a location."""
+    return diagnostics(
+        path=path,
+        context_lines=context_lines,
+        max_diagnostics=max_diagnostics,
+        line=line,
+        column=column,
+        diagnostic_kind=diagnostic_kind,
+    )
+
+
+@mcp.tool()
 def mcquest_search(
-    pattern: Annotated[str, Field(description="Regular expression to search for in source files.")],
-    path: Annotated[str, Field(description="Project-relative directory to search. Defaults to 'frontend/src'.")] = "frontend/src",
-    file_pattern: Annotated[str, Field(description="Glob pattern filtering which files to search. Defaults to '*' (all files).")] = "*",
+    pattern: Annotated[str, Field(description="Regular expression or text pattern to search for in source files. Supports regex alternation, e.g. 'foo|bar|baz'.")],
+    path: Annotated[str, Field(description="Project-relative directory to search. Defaults to 'frontend/src'; set it explicitly, e.g. 'src', when the selected project uses a different layout.")] = "frontend/src",
+    file_pattern: Annotated[str, Field(description="Filename glob restricting which files are searched; matches the file's basename, not the full path. Defaults to '*' (all files).")] = "*",
     case_sensitive: Annotated[bool, Field(description="When true, matching is case-sensitive. Defaults to false.")] = False,
     context_lines: Annotated[int, Field(description="Number of surrounding context lines to include per match. Defaults to 1.")] = 1,
     max_results: Annotated[int, Field(description="Maximum number of matches to return. Defaults to 200.")] = 200,
 ) -> str:
-    """READ ONLY. Search MCQuest source files using a regular expression. Returns exact relative file paths, line numbers, matching lines, and limited surrounding context. Prefer this for locating code patterns."""
+    """READ ONLY. Search source files in the selected project using a regular expression. Returns exact relative file paths, line numbers, matching lines, and limited surrounding context. Use for source-code pattern searches; use mcquest_search_docs for Markdown/documentation searches."""
     return search_text(
         pattern=pattern,
         path=path,
@@ -129,7 +162,7 @@ def mcquest_find_usages(
     file_pattern: Annotated[str, Field(description="Glob pattern filtering which files to search. Defaults to '*' (all files).")] = "*",
     max_results: Annotated[int, Field(description="Maximum number of references to return. Defaults to 200.")] = 200,
 ) -> str:
-    """READ ONLY. Find references to a symbol across MCQuest source files using word-boundary matching. Returns file:line:line-content. Use for discovering where a component, function, or variable is used."""
+    """READ ONLY. Find references to a symbol across the selected project's source files using word-boundary matching. Returns file:line:line-content. Use for discovering where a component, function, or variable is used."""
     return find_usages(
         symbol=symbol,
         path=path,
@@ -144,7 +177,7 @@ def mcquest_pattern_audit(
     categories: Annotated[str, Field(description="Pattern category group to run, or 'all' for every category. Defaults to 'all'.")] = "all",
     max_results_per_category: Annotated[int, Field(description="Maximum number of matches to return per category. Defaults to 100.")] = 100,
 ) -> str:
-    """READ ONLY. Run predefined MCQuest responsive/layout pattern searches. Categories include: viewport-width, large-min-width, large-fixed-width, nowrap, negative-horizontal-margin, horizontal-transform, negative-position, overflow-x, min-width, fixed-position, sticky-position, or 'all'. Returns evidence only — no modifications. Use for auditing potential mobile/responsive issues."""
+    """READ ONLY. Run predefined responsive/layout pattern searches in the selected project. Categories include: viewport-width, large-min-width, large-fixed-width, nowrap, negative-horizontal-margin, horizontal-transform, negative-position, overflow-x, min-width, fixed-position, sticky-position, or 'all'. Returns evidence only — no modifications. Use for auditing potential mobile/responsive issues."""
     return pattern_audit(
         path=path,
         categories=categories,
@@ -185,14 +218,14 @@ def mcquest_read_doc(
 
 @mcp.tool()
 def mcquest_search_docs(
-    pattern: Annotated[str, Field(description="Regular expression to search for in Markdown documentation.")],
-    path: Annotated[str, Field(description="Project-relative directory to search. Defaults to 'docs'.")] = "docs",
-    file_pattern: Annotated[str, Field(description="Glob pattern filtering which Markdown files to search. Defaults to '*.md'.")] = "*.md",
+    pattern: Annotated[str, Field(description="Regular expression or text pattern to search for in Markdown documentation. Supports regex alternation, e.g. 'foo|bar|baz'.")],
+    path: Annotated[str, Field(description="Project-relative directory to restrict the search to, e.g. 'docs'. Defaults to 'docs'.")] = "docs",
+    file_pattern: Annotated[str, Field(description="Filename glob restricting which Markdown files are searched; matches the file's basename, not the full path. Defaults to '*.md'. Examples: 'README*.md', '0[012]*.md'.")] = "*.md",
     case_sensitive: Annotated[bool, Field(description="When true, matching is case-sensitive. Defaults to false.")] = False,
     context_lines: Annotated[int, Field(description="Number of surrounding context lines to include per match. Defaults to 1.")] = 1,
     max_results: Annotated[int, Field(description="Maximum number of matches to return. Defaults to 200.")] = 200,
 ) -> str:
-    """READ ONLY. Search Markdown documentation using a regex or text pattern. Returns exact file paths, line numbers, matching lines, and limited surrounding context. Prefer this for finding specific topics across all documentation."""
+    """READ ONLY. PREFERRED TOOL FOR DOCUMENTATION SEARCH. Search Markdown documentation in the selected project using regex or text patterns. Use this instead of shell grep, rg, PowerShell Select-String, or manual Markdown scanning when the required operation is documentation search. Supports restricting the search to a directory (path), filtering files by filename glob (file_pattern), regex with alternation (pattern, e.g. 'foo|bar|baz'), line numbers with optional surrounding context (context_lines), case sensitivity (case_sensitive), and bounded results (max_results). Use mcquest_search for source-code searches."""
     return search_docs(
         pattern=pattern,
         path=path,
@@ -227,7 +260,7 @@ def mcquest_phase_context(
 
 @mcp.tool()
 def mcquest_project_context() -> str:
-    """READ ONLY. Provide a compact high-level understanding of the MCQuest project. Returns technology stack, major directories, important source areas, documentation paths, and key configuration files. Use this as the first context call before a large investigation."""
+    """READ ONLY. Provide a compact high-level understanding of the selected project. Returns technology stack, major directories, important source areas, documentation paths, and key configuration files. Use this as the first context call before a large investigation."""
     return project_context()
 
 

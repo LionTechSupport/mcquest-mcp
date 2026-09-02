@@ -458,6 +458,50 @@ The AI agent performs the final interpretation.
 
 ---
 
+# 13.1 mcquest_diagnostics
+
+Purpose:
+
+Return compact **syntax diagnostics** for a single TypeScript/TSX/JS/JSX source
+file without reading the entire file, so an agent can diagnose a compiler/parser
+error (e.g. `'}' expected`, `')' expected`, `']' expected`, `TS1005`, unexpected
+token, unterminated string/template, JSX closing-tag problems) from the
+diagnostic location plus a small source context window.
+
+Inputs:
+
+- path (project-relative `.ts` / `.tsx` / `.js` / `.jsx` file)
+- context_lines (default 12, bounded 0-25)
+- max_diagnostics (default 20, bounded 1-50)
+- line / column (optional focus filters)
+- diagnostic_kind (only `"syntax"` in this version)
+
+Mechanism:
+
+- The selected project's own Node runtime loads the project-local TypeScript
+  compiler bundle (`node_modules/typescript/lib/typescript.js`) via a bundled
+  driver (`src/mcquest_mcp/ts/diagnose.js`).
+- The driver parses the file with `ts.createSourceFile` — a pure parser. No
+  module resolution, no type checking, no `tsconfig`, no `createProgram`, no
+  LanguageService, and no application code is executed.
+- Source text is passed through stdin; all paths are validated inside the
+  project root; a timeout is enforced.
+- Output is bounded by `max_diagnostics` and `context_lines` and includes
+  TypeScript-provided related locations (e.g. the opening `{` that caused a
+  parser mismatch) when available — never fabricated.
+
+Semantic/type diagnostics (P3) and bounded project-wide diagnostics (P4) are
+deliberately **not** implemented in this version. `diagnostic_kind` accepts only
+`"syntax"`; unsupported values are rejected clearly.
+
+If the selected project has no local TypeScript installation, the tool returns:
+
+    TypeScript compiler unavailable in selected project.
+
+It never downloads or installs anything.
+
+---
+
 # 14. Read-Only Security Model
 
 The MCP must remain strictly read-only.
@@ -476,11 +520,27 @@ Forbidden:
 - deleting files
 - renaming files
 - shell execution
-- subprocess execution against the project
+- arbitrary subprocess execution against the project
 - package installation
 - Git mutation
 - network requests initiated on behalf of the project
 - code execution from target files
+
+**Sanctioned narrow subprocess exceptions.** Two tools invoke a fixed,
+read-only executable with explicit, non-mutating arguments — the same trust
+posture as running `git` directly:
+
+- `mcquest_git_context` runs `git --no-pager` with read-only arguments.
+- `mcquest_diagnostics` runs the selected project's own Node runtime against the
+  project-local TypeScript compiler parser
+  (`node_modules/typescript/lib/typescript.js`) via the bundled driver
+  `src/mcquest_mcp/ts/diagnose.js`. The driver parses a single file with
+  `ts.createSourceFile` (pure parser) fed through stdin; it never runs `npx`,
+  `npm`, `tsc`, `tsconfig`, `createProgram`, a LanguageService, or application
+  code. All paths are validated inside the project root, a timeout is enforced,
+  and no files are written.
+
+Arbitrary project process execution remains forbidden.
 
 The target project should be treated as untrusted input.
 

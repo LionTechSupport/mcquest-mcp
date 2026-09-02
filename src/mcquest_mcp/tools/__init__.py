@@ -1,5 +1,6 @@
 from .audit import pattern_audit
 from .context import find_evidence, project_context
+from .diagnostics import diagnostics
 from .docs import compare_phase, list_docs, phase_context, read_doc, search_docs
 from .files import find_files, list_files, read_file
 from .git_context import git_context
@@ -16,6 +17,7 @@ __all__ = [
     "find_imports",
     "find_usages",
     "pattern_audit",
+    "diagnostics",
     "list_docs",
     "read_doc",
     "search_docs",

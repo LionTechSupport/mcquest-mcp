@@ -1,6 +1,6 @@
-"""Regression: exactly the 16 approved MCP tools remain registered.
+"""Regression: exactly the 17 approved MCP tools remain registered.
 
-No tool may be added, renamed, or removed by the v0.3 changes.
+No tool may be added, renamed, or removed by the v0.3/v0.4 changes.
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ from mcquest_mcp.server import mcp
 
 EXPECTED_TOOLS = [
     "mcquest_compare_phase",
+    "mcquest_diagnostics",
     "mcquest_find_evidence",
     "mcquest_find_files",
     "mcquest_find_imports",
@@ -30,11 +31,11 @@ EXPECTED_TOOLS = [
 ]
 
 
-def test_exactly_16_tools_remain_registered() -> None:
+def test_exactly_17_tools_remain_registered() -> None:
     tools = asyncio.run(mcp.list_tools())
     names = sorted(tool.name for tool in tools)
     assert names == EXPECTED_TOOLS
-    assert len(names) == 16
+    assert len(names) == 17
 
 
 def test_mcquest_read_file_parameter_descriptions_and_semantics() -> None:
@@ -56,3 +57,35 @@ def test_mcquest_read_file_parameter_descriptions_and_semantics() -> None:
     assert properties["start_line"]["default"] == 1
     assert properties["start_line"]["type"] == "integer"
     assert properties["end_line"]["default"] is None
+
+
+def test_mcquest_diagnostics_parameter_descriptions_and_semantics() -> None:
+    """mcquest_diagnostics exposes a description per parameter and keeps schema semantics."""
+    tools = asyncio.run(mcp.list_tools())
+    tool = next(t for t in tools if t.name == "mcquest_diagnostics")
+    properties = tool.input_schema["properties"]
+
+    for param in (
+        "path",
+        "context_lines",
+        "max_diagnostics",
+        "line",
+        "column",
+        "diagnostic_kind",
+    ):
+        assert param in properties
+        description = properties[param].get("description")
+        assert isinstance(description, str) and description.strip(), (
+            f"{param} missing a non-empty description"
+        )
+
+    # Preserved schema semantics.
+    assert tool.input_schema["required"] == ["path"]
+    assert properties["path"]["type"] == "string"
+    assert properties["context_lines"]["default"] == 12
+    assert properties["context_lines"]["type"] == "integer"
+    assert properties["max_diagnostics"]["default"] == 20
+    assert properties["max_diagnostics"]["type"] == "integer"
+    assert properties["line"]["default"] is None
+    assert properties["column"]["default"] is None
+    assert properties["diagnostic_kind"]["default"] == "syntax"
