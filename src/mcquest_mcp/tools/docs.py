@@ -1,16 +1,27 @@
 from __future__ import annotations
 
 import fnmatch
+import heapq
+import os
 import re
 from pathlib import Path
 
 from ..config import (
+    DISCOVERY_DEFAULT_RESULTS,
+    DISCOVERY_MAX_RESULTS,
     IGNORED_DIRECTORIES,
     IGNORED_EXTENSIONS,
     MAX_FILE_BYTES,
     MAX_SEARCH_RESULTS,
+    SEARCH_CONTEXT_CAP_DOCS,
+    SEARCH_DEFAULT_RESULTS,
 )
-from ..formatting import numbered_lines, truncate
+from ..formatting import (
+    discovery_block,
+    read_window_block,
+    search_block,
+    truncate,
+)
 from ..security import (
     is_ignored_path,
     project_root,
@@ -28,7 +39,7 @@ def _is_markdown(path: Path) -> bool:
 
 
 def _markdown_files(root: Path):
-    for current_root, dirs, files in __import__("os").walk(root):
+    for current_root, dirs, files in os.walk(root):
         current = Path(current_root)
 
         dirs[:] = [
@@ -52,18 +63,48 @@ def _markdown_files(root: Path):
             yield path
 
 
+_DOC_TYPE_ORDER = ["IMPLEMENTATION", "AUDIT", "COMPLETION", "VERIFICATION"]
+
+
+def _format_doc_aggregates(type_counts: dict[str, int]) -> str:
+    """Render deterministic doc-type aggregate metadata for ``list_docs``.
+
+    Counts are grouped by ``_classify_phase_doc``; keys are ordered by the
+    canonical type order first (IMPLEMENTATION, AUDIT, COMPLETION,
+    VERIFICATION), then any OTHER keys alphabetically, so repeated calls
+    produce byte-identical output (D009).
+    """
+    keys = [k for k in _DOC_TYPE_ORDER if k in type_counts]
+    keys += sorted(
+        k for k in type_counts if k not in _DOC_TYPE_ORDER
+    )
+    return " ; ".join(f"{key}={type_counts[key]}" for key in keys)
+
+
 def list_docs(
     path: str = "docs",
     pattern: str = "*.md",
-    max_results: int = 200,
+    max_results: int = DISCOVERY_DEFAULT_RESULTS,
+    offset: int = 0,
 ) -> str:
     """
-    List Markdown documentation files beneath a project directory.
+    List Markdown documentation files beneath a project directory
+    (summary-first, paged).
+
+    Returns a canonical ``[SUMMARY]`` block (total, COUNT, returned, offset,
+    next_offset, has_more, truncated, aggregate doc-type breakdown) followed
+    by one explicit page of at most ``max_results`` relative doc paths,
+    ordered deterministically by ``relative_path ASC`` (D009). ``offset``
+    (0-based) continues from the previous page's ``next_offset``; page 2 is
+    never returned automatically (D008).
 
     Excludes dependency/generated directories and non-Markdown files.
     """
 
-    max_results = min(max(max_results, 1), MAX_SEARCH_RESULTS)
+    if offset < 0:
+        raise ValueError("offset must be >= 0")
+
+    page_size = min(max(max_results, 1), DISCOVERY_MAX_RESULTS)
 
     root = resolve_project_path(path)
 
@@ -75,28 +116,41 @@ def list_docs(
             return root.relative_to(project_root()).as_posix()
         raise ValueError(f"Not a Markdown file: {path}")
 
-    results: list[str] = []
+    def iter_matches():
+        for file_path in _markdown_files(root):
+            if not fnmatch.fnmatch(file_path.name, pattern):
+                continue
+            yield file_path.relative_to(project_root()).as_posix()
 
-    for file_path in _markdown_files(root):
-        if len(results) >= max_results:
-            break
+    total = 0
+    type_counts: dict[str, int] = {}
 
-        if not fnmatch.fnmatch(file_path.name, pattern):
-            continue
+    for relative in iter_matches():
+        total += 1
+        doc_type = _classify_phase_doc(Path(relative).name)
+        type_counts[doc_type] = type_counts.get(doc_type, 0) + 1
 
-        results.append(
-            file_path.relative_to(project_root()).as_posix()
-        )
+    page: list[str] = []
+    if offset < total:
+        keep = min(offset + page_size, total)
+        smallest = heapq.nsmallest(keep, iter_matches())
+        page = sorted(smallest)[offset:offset + page_size]
 
-    results.sort()
+    root_display = (
+        root.relative_to(project_root()).as_posix()
+        if root != project_root()
+        else "."
+    )
 
-    output = "\n".join(results)
-
-    return truncate(
-        f"ROOT: {root.relative_to(project_root()) if root != project_root() else '.'}\n"
-        f"PATTERN: {pattern}\n"
-        f"COUNT: {len(results)}\n\n"
-        + output
+    return discovery_block(
+        tool="mcquest_list_docs",
+        path=path,
+        items=page,
+        total=total,
+        offset=offset,
+        fields={"ROOT": root_display, "PATTERN": pattern},
+        aggregates=_format_doc_aggregates(type_counts),
+        expanded=offset > 0 or max_results > DISCOVERY_DEFAULT_RESULTS,
     )
 
 
@@ -107,6 +161,11 @@ def read_doc(
 ) -> str:
     """
     Read a Markdown documentation file with exact line numbers.
+
+    Unranged reads (start_line=1, end_line omitted) return a bounded
+    default window (at most 250 lines) with total_lines / next_start_line /
+    has_more continuation metadata. Explicitly ranged reads are honored up
+    to a 1,000-line window under the absolute 16,000-character ceiling.
 
     Use line ranges whenever possible instead of requesting huge files.
     """
@@ -126,11 +185,40 @@ def read_doc(
         errors="replace",
     )
 
-    return numbered_lines(
-        text,
+    return read_window_block(
+        tool="mcquest_read_doc",
+        path=path,
+        text=text,
         start_line=start_line,
         end_line=end_line,
     )
+
+
+def _build_doc_snippet(
+    relative: str,
+    line_no: int,
+    lines: list[str],
+    context_lines: int,
+) -> str:
+    """Render one documentation match as a ``relative:line`` + context block."""
+    index = line_no - 1
+    start = max(0, index - context_lines)
+    end = min(len(lines), index + context_lines + 1)
+    context = "\n".join(
+        f"  {i + 1}: {lines[i]}"
+        for i in range(start, end)
+    )
+    return f"{relative}:{line_no}\n{context}"
+
+
+def _read_md_lines(file_path: Path) -> list[str]:
+    try:
+        return file_path.read_text(
+            encoding="utf-8",
+            errors="replace",
+        ).splitlines()
+    except OSError:
+        return []
 
 
 def search_docs(
@@ -139,17 +227,25 @@ def search_docs(
     file_pattern: str = "*.md",
     case_sensitive: bool = False,
     context_lines: int = 1,
-    max_results: int = 200,
+    max_results: int = SEARCH_DEFAULT_RESULTS,
+    offset: int = 0,
 ) -> str:
     """
     Search Markdown documentation using a regex or text pattern.
 
-    Returns exact file paths, line numbers, matching lines,
-    and limited surrounding context.
+    Summary-first and explicitly paged (D008/D009/D016): returns a canonical
+    ``[SUMMARY]`` block (total, files_affected, returned, offset, next_offset,
+    has_more, truncated, collection_complete, budget) followed by one page of
+    at most ``max_results`` snippet results ordered deterministically by
+    ``(relative_path ASC, line ASC)``. Documentation context is capped at
+    ``SEARCH_CONTEXT_CAP_DOCS``; snippet lines are clipped to 200 chars.
     """
 
     max_results = min(max(max_results, 1), MAX_SEARCH_RESULTS)
-    context_lines = min(max(context_lines, 0), 5)
+    context_lines = min(max(context_lines, 0), SEARCH_CONTEXT_CAP_DOCS)
+
+    if offset < 0:
+        raise ValueError("offset must be >= 0")
 
     root = resolve_project_path(path)
 
@@ -163,63 +259,73 @@ def search_docs(
     except re.error as exc:
         raise ValueError(f"Invalid regex: {exc}") from exc
 
-    results: list[str] = []
-    match_count = 0
-
-    for file_path in _markdown_files(root):
-        if match_count >= max_results:
-            break
-
-        if not fnmatch.fnmatch(file_path.name, file_pattern):
-            continue
-
-        try:
-            if file_path.stat().st_size > MAX_FILE_BYTES:
+    def iter_matching_files():
+        for file_path in _markdown_files(root):
+            if not fnmatch.fnmatch(file_path.name, file_pattern):
                 continue
-
-            lines = file_path.read_text(
-                encoding="utf-8",
-                errors="replace",
-            ).splitlines()
-
-        except OSError:
-            continue
-
-        for index, line in enumerate(lines):
-            if not regex.search(line):
+            try:
+                if file_path.stat().st_size > MAX_FILE_BYTES:
+                    continue
+            except OSError:
                 continue
+            yield file_path
 
-            match_count += 1
+    # Pass 1: authoritative full count (approved two-pass full-count).
+    total = 0
+    files_affected = 0
 
-            relative = file_path.relative_to(project_root()).as_posix()
+    for file_path in iter_matching_files():
+        lines = _read_md_lines(file_path)
+        matches = sum(1 for line in lines if regex.search(line))
+        if matches:
+            total += matches
+            files_affected += 1
 
-            start = max(0, index - context_lines)
-            end = min(len(lines), index + context_lines + 1)
+    # Pass 2: bounded, deterministic page window.
+    page_size = min(max_results, max(total - offset, 0))
+    page: list[tuple[str, int]] = []
+    if page_size > 0:
+        def iter_locations():
+            for file_path in iter_matching_files():
+                relative = file_path.relative_to(
+                    project_root()
+                ).as_posix()
+                for index, line in enumerate(
+                    _read_md_lines(file_path),
+                    start=1,
+                ):
+                    if regex.search(line):
+                        yield (relative, index)
 
-            results.append(
-                f"{relative}:{index + 1}\n"
-                + "\n".join(
-                    f"  {i + 1}: {lines[i]}"
-                    for i in range(start, end)
-                )
-                + "\n"
+        needed = min(offset + page_size, total)
+        smallest = heapq.nsmallest(needed, iter_locations())
+        page = sorted(smallest)[offset : offset + page_size]
+
+    items: list[str] = []
+    cache: dict[str, list[str]] = {}
+    for relative, line_no in page:
+        if relative not in cache:
+            cache[relative] = _read_md_lines(
+                resolve_project_path(relative)
             )
-
-            if match_count >= max_results:
-                break
-
-    if not results:
-        return (
-            f"PATTERN: {pattern}\n"
-            f"PATH: {path}\n"
-            "MATCHES: 0"
+        items.append(
+            _build_doc_snippet(
+                relative,
+                line_no,
+                cache[relative],
+                context_lines,
+            )
         )
 
-    return truncate(
-        f"PATTERN: {pattern}\n"
-        f"PATH: {path}\n"
-        f"MATCHES RETURNED: {match_count}\n\n"
-        + "\n".join(results)
+    return search_block(
+        tool="mcquest_search_docs",
+        path=path,
+        items=items,
+        total=total,
+        files_affected=files_affected,
+        offset=offset,
+        fields={"PATTERN": pattern, "PATH": path},
+        expanded=offset > 0 or max_results > SEARCH_DEFAULT_RESULTS,
     )
 
 
@@ -239,8 +345,9 @@ def phase_context(
     query: str = "",
     phase: str = "",
     path: str = "docs",
-    max_results: int = 50,
-    context_lines: int = 2,
+    max_results: int = SEARCH_DEFAULT_RESULTS,
+    context_lines: int = 1,
+    offset: int = 0,
     include_implementation: bool = True,
     include_audits: bool = True,
 ) -> str:
@@ -253,6 +360,12 @@ def phase_context(
 
     When 'phase' is provided, it takes precedence over 'query'.
     Results are grouped by document type when using phase mode.
+
+    Query mode is summary-first and explicitly paged (D008/D009/D016): a
+    canonical ``[SUMMARY]`` block (total, files_affected, returned, offset,
+    next_offset, has_more, truncated, budget) followed by one page of at most
+    ``max_results`` matches ordered deterministically by
+    ``(relative_path ASC, line ASC)``.
     """
 
     effective_query = _resolve_query(query, phase)
@@ -263,7 +376,10 @@ def phase_context(
         )
 
     max_results = min(max(max_results, 1), MAX_SEARCH_RESULTS)
-    context_lines = min(max(context_lines, 0), 5)
+    context_lines = min(max(context_lines, 0), SEARCH_CONTEXT_CAP_DOCS)
+
+    if offset < 0:
+        raise ValueError("offset must be >= 0")
 
     root = resolve_project_path(path)
 
@@ -281,7 +397,7 @@ def phase_context(
             include_audits=include_audits,
         )
 
-    # Standard query mode (backward compatible)
+    # Standard query mode (Phase D: summary-first + explicit offset paging).
     query_lower = effective_query.strip().lower()
 
     try:
@@ -289,70 +405,82 @@ def phase_context(
     except re.error as exc:
         raise ValueError(f"Invalid query: {exc}") from exc
 
-    results: list[str] = []
-    match_count = 0
-
-    for file_path in _markdown_files(root):
-        if match_count >= max_results:
-            break
-
-        try:
-            if file_path.stat().st_size > MAX_FILE_BYTES:
+    def iter_matching_files():
+        for file_path in _markdown_files(root):
+            try:
+                if file_path.stat().st_size > MAX_FILE_BYTES:
+                    continue
+            except OSError:
                 continue
+            yield file_path
 
-            lines = file_path.read_text(
-                encoding="utf-8",
-                errors="replace",
-            ).splitlines()
+    # Pass 1: authoritative full count (approved two-pass full-count).
+    total = 0
+    files_affected = 0
 
-        except OSError:
-            continue
+    for file_path in iter_matching_files():
+        lines = _read_md_lines(file_path)
+        matches = sum(1 for line in lines if regex.search(line))
+        if matches:
+            total += matches
+            files_affected += 1
 
-        for index, line in enumerate(lines):
-            if not regex.search(line):
-                continue
+    # Pass 2: bounded, deterministic page window.
+    page_size = min(max_results, max(total - offset, 0))
+    page: list[tuple[str, int]] = []
+    if page_size > 0:
+        def iter_locations():
+            for file_path in iter_matching_files():
+                relative = file_path.relative_to(
+                    project_root()
+                ).as_posix()
+                for index, line in enumerate(
+                    _read_md_lines(file_path),
+                    start=1,
+                ):
+                    if regex.search(line):
+                        yield (relative, index)
 
-            match_count += 1
+        needed = min(offset + page_size, total)
+        smallest = heapq.nsmallest(needed, iter_locations())
+        page = sorted(smallest)[offset : offset + page_size]
 
-            relative = file_path.relative_to(project_root()).as_posix()
-
-            heading = _nearest_heading(lines, index)
-
-            heading_str = (
-                f"HEADING: {heading[1]} (line {heading[0]})"
-                if heading
-                else "HEADING: (none)"
+    items: list[str] = []
+    cache: dict[str, list[str]] = {}
+    for relative, line_no in page:
+        if relative not in cache:
+            cache[relative] = _read_md_lines(
+                resolve_project_path(relative)
             )
-
-            start = max(0, index - context_lines)
-            end = min(len(lines), index + context_lines + 1)
-
-            results.append(
-                f"{relative}:{index + 1}\n"
-                f"{heading_str}\n"
-                + "\n".join(
-                    f"  {i + 1}: {lines[i]}"
-                    for i in range(start, end)
-                )
-                + "\n"
+        index = line_no - 1
+        heading = _nearest_heading(cache[relative], index)
+        heading_str = (
+            f"HEADING: {heading[1]} (line {heading[0]})"
+            if heading
+            else "HEADING: (none)"
+        )
+        start = max(0, index - context_lines)
+        end = min(len(cache[relative]), index + context_lines + 1)
+        items.append(
+            f"{relative}:{line_no}\n{heading_str}\n"
+            + "\n".join(
+                f"  {i + 1}: {cache[relative][i]}"
+                for i in range(start, end)
             )
-
-            if match_count >= max_results:
-                break
-
-    if not results:
-        return (
-            f"QUERY: {effective_query}\n"
-            f"PATH: {path}\n"
-            "MATCHES: 0"
         )
 
-    return truncate(
-        f"QUERY: {effective_query}\n"
-        f"PATH: {path}\n"
-        f"MATCHES RETURNED: {match_count}\n\n"
-        + "\n".join(results)
+    return search_block(
+        tool="mcquest_phase_context",
+        path=path,
+        items=items,
+        total=total,
+        files_affected=files_affected,
+        offset=offset,
+        fields={"QUERY": effective_query, "PATH": path},
+        expanded=offset > 0 or max_results > SEARCH_DEFAULT_RESULTS,
     )
+
+
 def _resolve_query(query: str, phase: str) -> str:
     """Resolve the effective search query from query and phase params."""
     if phase.strip():
@@ -375,6 +503,8 @@ def _classify_phase_doc(filename: str) -> str:
     if "verif" in name or "test" in name:
         return "VERIFICATION"
     return "OTHER"
+
+
 def _phase_structured_lookup(
     phase: str,
     root: Path,

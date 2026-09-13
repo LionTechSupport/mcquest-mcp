@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import heapq
+import os
 import re
 from pathlib import Path
 
@@ -10,8 +12,9 @@ from ..config import (
     IGNORED_EXTENSIONS,
     MAX_FILE_BYTES,
     MAX_SEARCH_RESULTS,
+    SEARCH_DEFAULT_RESULTS,
 )
-from ..formatting import truncate
+from ..formatting import search_block, truncate
 from ..security import (
     is_ignored_path,
     project_root,
@@ -107,137 +110,178 @@ def project_context() -> str:
     parts.append("Use mcquest_phase_context for phase-specific docs.")
     parts.append("Use mcquest_find_evidence for cross-searching.")
     return truncate("\n".join(parts))
+def _count_stream(iter_locations) -> "tuple[int, int]":
+    """Return (total_matches, files_affected) from a (relative, line) stream."""
+    total = 0
+    files: set[str] = set()
+    for relative, _line_no in iter_locations:
+        total += 1
+        files.add(relative)
+    return total, len(files)
+
+
+def _safe_regex_lines(file_path) -> list[str]:
+    try:
+        return file_path.read_text(
+            encoding="utf-8",
+            errors="replace",
+        ).splitlines()
+    except OSError:
+        return []
+
+
 def find_evidence(
     query: str,
     phase: str = "",
     scope: str = "all",
     path: str = "frontend/src",
     docs_path: str = "docs",
-    max_results: int = 50,
+    max_results: int = SEARCH_DEFAULT_RESULTS,
     context_lines: int = 1,
+    offset: int = 0,
 ) -> str:
-    """Search across code, documentation, and phase evidence."""
+    """Search across code, documentation, and phase evidence.
+
+    Summary-first and explicitly paged with ONE shared page budget (D003,
+    D013): ``scope=\"all\"`` merges the code stream first and the docs stream
+    second into one deterministic ``(relative_path ASC, line ASC)`` ordering,
+    and ``max_results`` is a single merged-stream page budget -- never a
+    per-scope limit and never ``min(code_total, docs_total)``. Per-scope
+    counts are reported separately (``counts: code=N; docs=M``).
+    """
+
     if not query.strip():
         raise ValueError("Query cannot be empty.")
     max_results = min(max(max_results, 1), MAX_SEARCH_RESULTS)
     context_lines = min(max(context_lines, 0), 5)
+    if offset < 0:
+        raise ValueError("offset must be >= 0")
     scope = scope.lower().strip()
     valid_scopes = {"code", "docs", "phase", "all"}
     if scope not in valid_scopes:
         raise ValueError(f"Scope must be one of: {', '.join(sorted(valid_scopes))}")
-    parts: list[str] = []
-    parts.append(f"EVIDENCE SEARCH: {query}")
-    parts.append(f"SCOPE: {scope}")
-    if phase.strip():
-        parts.append(f"PHASE FILTER: {phase}")
-    parts.append("=" * 40)
     try:
         regex = re.compile(query, re.IGNORECASE)
     except re.error as exc:
         raise ValueError(f"Invalid regex: {exc}") from exc
-    total_matches = 0
-    if scope in ("code", "all"):
-        parts.append("\n## CODE EVIDENCE")
-        cr, cc = _search_source_files(regex, path, phase, max_results, context_lines)
-        total_matches += cc
-        parts.extend(cr) if cr else parts.append("  (no matches)")
-    if scope in ("docs", "phase", "all"):
-        parts.append("\n## DOCUMENTATION EVIDENCE")
-        dr, dc = _search_doc_files(regex, docs_path, phase, max_results, context_lines)
-        total_matches += dc
-        parts.extend(dr) if dr else parts.append("  (no matches)")
-    parts.append(f"\nTOTAL MATCHES: {total_matches}")
-    return truncate("\n".join(parts))
 
-
-def _search_source_files(
-    regex: "re.Pattern[str]",
-    path: str,
-    phase: str,
-    max_results: int,
-    context_lines: int,
-) -> "tuple[list[str], int]":
-    """Search source code files."""
-    root = resolve_project_path(path)
-    results: list[str] = []
-    match_count = 0
-    source_exts = {".ts", ".tsx", ".js", ".jsx", ".css"}
-    for current_root, dirs, files in __import__("os").walk(root):
-        current = Path(current_root)
-        dirs[:] = [d for d in dirs if d not in IGNORED_DIRECTORIES]
-        for filename in files:
-            if match_count >= max_results:
-                break
-            file_path = current / filename
-            if file_path.suffix.lower() not in source_exts:
-                continue
-            if is_ignored_path(file_path):
-                continue
-            try:
-                if file_path.stat().st_size > MAX_FILE_BYTES:
-                    continue
-                lines = file_path.read_text(encoding="utf-8", errors="replace").splitlines()
-            except OSError:
-                continue
-            for index, line in enumerate(lines):
-                if not regex.search(line):
-                    continue
-                match_count += 1
-                relative = file_path.relative_to(project_root()).as_posix()
-                start = max(0, index - context_lines)
-                end = min(len(lines), index + context_lines + 1)
-                snippet = "\n".join(f"  {i + 1}: {lines[i]}" for i in range(start, end))
-                results.append(f"  {relative}:{index + 1}\n{snippet}\n")
-                if match_count >= max_results:
-                    break
-    return results, match_count
-
-
-def _search_doc_files(
-    regex: "re.Pattern[str]",
-    path: str,
-    phase: str,
-    max_results: int,
-    context_lines: int,
-) -> "tuple[list[str], int]":
-    """Search documentation files, optionally filtered by phase."""
-    root = resolve_project_path(path)
-    results: list[str] = []
-    match_count = 0
-    markdown_exts = {".md", ".markdown", ".mdown", ".mkd"}
+    search_code = scope in ("code", "all")
+    search_docs = scope in ("docs", "phase", "all")
     phase_lower = phase.strip().lower() if phase.strip() else ""
-    for current_root, dirs, files in __import__("os").walk(root):
-        current = Path(current_root)
-        dirs[:] = [d for d in dirs if d not in IGNORED_DIRECTORIES]
-        for filename in sorted(files):
-            if match_count >= max_results:
-                break
-            file_path = current / filename
-            if file_path.suffix.lower() not in markdown_exts:
-                continue
-            if is_ignored_path(file_path):
-                continue
-            if phase_lower:
-                name_lower = filename.lower()
-                if phase_lower not in name_lower and not re.search(
-                    r"phase[-\s]*" + re.escape(phase_lower), name_lower,
-                ):
+
+    def code_locations() -> "list[tuple[str, int]]":
+        root = resolve_project_path(path)
+        source_exts = {".ts", ".tsx", ".js", ".jsx", ".css"}
+        for current_root, dirs, files in os.walk(root):
+            current = Path(current_root)
+            dirs[:] = [d for d in dirs if d not in IGNORED_DIRECTORIES]
+            for filename in sorted(files):
+                file_path = current / filename
+                if file_path.suffix.lower() not in source_exts:
                     continue
-            try:
-                if file_path.stat().st_size > MAX_FILE_BYTES:
+                if is_ignored_path(file_path):
                     continue
-                lines = file_path.read_text(encoding="utf-8", errors="replace").splitlines()
-            except OSError:
-                continue
-            for index, line in enumerate(lines):
-                if not regex.search(line):
+                try:
+                    if file_path.stat().st_size > MAX_FILE_BYTES:
+                        continue
+                except OSError:
                     continue
-                match_count += 1
                 relative = file_path.relative_to(project_root()).as_posix()
-                start = max(0, index - context_lines)
-                end = min(len(lines), index + context_lines + 1)
-                snippet = "\n".join(f"  {i + 1}: {lines[i]}" for i in range(start, end))
-                results.append(f"  {relative}:{index + 1}\n{snippet}\n")
-                if match_count >= max_results:
-                    break
-    return results, match_count
+                for index, line in enumerate(
+                    _safe_regex_lines(file_path),
+                    start=1,
+                ):
+                    if regex.search(line):
+                        yield (relative, index)
+
+    def doc_locations() -> "list[tuple[str, int]]":
+        root = resolve_project_path(docs_path)
+        markdown_exts = {".md", ".markdown", ".mdown", ".mkd"}
+        for current_root, dirs, files in os.walk(root):
+            current = Path(current_root)
+            dirs[:] = [d for d in dirs if d not in IGNORED_DIRECTORIES]
+            for filename in sorted(files):
+                file_path = current / filename
+                if file_path.suffix.lower() not in markdown_exts:
+                    continue
+                if is_ignored_path(file_path):
+                    continue
+                if phase_lower:
+                    name_lower = filename.lower()
+                    if phase_lower not in name_lower and not re.search(
+                        r"phase[-\s]*" + re.escape(phase_lower),
+                        name_lower,
+                    ):
+                        continue
+                try:
+                    if file_path.stat().st_size > MAX_FILE_BYTES:
+                        continue
+                except OSError:
+                    continue
+                relative = file_path.relative_to(project_root()).as_posix()
+                for index, line in enumerate(
+                    _safe_regex_lines(file_path),
+                    start=1,
+                ):
+                    if regex.search(line):
+                        yield (relative, index)
+
+
+# Pass 1: authoritative per-scope totals (and therefore merged total).
+    code_total = docs_total = 0
+    code_files = docs_files = 0
+    if search_code:
+        code_total, code_files = _count_stream(code_locations())
+    if search_docs:
+        docs_total, docs_files = _count_stream(doc_locations())
+    total = code_total + docs_total  # authoritative; NEVER min(code, docs)
+    files_affected = code_files + docs_files
+
+    # Pass 2: ONE shared page budget over the deterministic merged stream
+    # (code group first, then docs group; each (relative ASC, line ASC)).
+    page_size = min(max_results, max(total - offset, 0))
+    page: list[tuple[str, int]] = []
+    if page_size > 0:
+        needed = min(offset + page_size, total)
+        merged: list[tuple[str, int]] = []
+        if search_code and needed > 0:
+            merged.extend(sorted(heapq.nsmallest(needed, code_locations())))
+        if search_docs and needed > 0:
+            merged.extend(sorted(heapq.nsmallest(needed, doc_locations())))
+        page = merged[offset : offset + page_size]
+
+    items: list[str] = []
+    cache: dict[str, list[str]] = {}
+    for relative, line_no in page:
+        if relative not in cache:
+            cache[relative] = _safe_regex_lines(resolve_project_path(relative))
+        index = line_no - 1
+        start = max(0, index - context_lines)
+        end = min(len(cache[relative]), index + context_lines + 1)
+        snippet = "\n".join(
+            f"  {i + 1}: {cache[relative][i]}" for i in range(start, end)
+        )
+        items.append(f"{relative}:{line_no}\n{snippet}")
+
+    fields: dict[str, object] = {
+        "QUERY": query,
+        "SCOPE": scope,
+    }
+    if phase.strip():
+        fields["PHASE"] = phase.strip()
+    fields["counts"] = f"code={code_total}; docs={docs_total}"
+
+    return search_block(
+        tool="mcquest_find_evidence",
+        path=path,
+        items=items,
+        total=total,
+        files_affected=files_affected,
+        offset=offset,
+        fields=fields,
+        scope=(
+            f'query="{query}" scope="{scope}" '
+            f'path="{path}" docs_path="{docs_path}"'
+        ),
+        expanded=offset > 0 or max_results > SEARCH_DEFAULT_RESULTS,
+    )
