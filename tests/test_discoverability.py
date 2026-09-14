@@ -103,3 +103,58 @@ def test_search_docs_parameter_descriptions_support_shell_translation() -> None:
 
     file_pattern = props["file_pattern"]["description"]
     assert "basename" in file_pattern
+
+
+# --- V0.6 Phase 1 discoverability hardening ----------------------------------
+
+
+def test_find_usages_description_states_scan_scope() -> None:
+    desc = _tool("mcquest_find_usages").description
+    # The TS/TSX/JS/JSX-only limitation is now explicit so a 0-result on other
+    # languages is not mistaken for "no references anywhere".
+    assert ".ts, .tsx, .js, .jsx" in desc
+    assert "TypeScript/TSX/JavaScript/JSX" in desc
+    assert "other languages report total: 0" in desc
+
+
+def test_find_evidence_description_states_code_stream_language_scope() -> None:
+    desc = _tool("mcquest_find_evidence").description
+    assert ".ts, .tsx, .js, .jsx, .css" in desc
+    assert "docs stream scans Markdown" in desc
+    assert "collection_complete=true means the authoritative total/count is known" in desc
+    assert "does NOT mean every result was delivered" in desc
+
+
+def test_phase_and_compare_phases_state_naming_convention() -> None:
+    for name in ("mcquest_phase_context", "mcquest_compare_phase"):
+        desc = _tool(name).description
+        assert "phase-<id>" in desc
+        assert "naming convention" in desc
+        assert "'phase-61'" in desc
+
+
+def test_pattern_audit_description_states_summary_first_and_expansion() -> None:
+    desc = _tool("mcquest_pattern_audit").description
+    assert "summary-first" in desc
+    assert "[CATEGORY COUNTS]" in desc
+    assert "no uncontrolled category dump" in desc
+    assert "'category' parameter" in desc
+    assert "4,000-character" in desc
+    assert "16,000-character" in desc
+
+    props = _tool("mcquest_pattern_audit").input_schema["properties"]
+    assert "category" in props
+    for trigger in (
+        "overrides 'categories'",
+        "sticky-position",
+        "Valid values",
+        "summary mode",
+    ):
+        assert trigger in props["category"]["description"]
+
+
+def test_server_instructions_clarify_collection_complete_semantics() -> None:
+    text = mcp.instructions
+    assert "collection_complete=true" in text
+    assert "NOT mean every result" in text
+    assert "'has_more=true'" in text

@@ -43,7 +43,11 @@ mcp = MCPServer(
         "investigation. Use mcquest_diagnostics for TypeScript/TSX/JavaScript/JSX "
         "parser or compiler diagnostics; when the compiler/parser has already "
         "identified an error location, use it instead of reading the entire "
-        "large source file. Shell remains acceptable when the MCP does not "
+        "large source file. In every tool output, 'collection_complete=true' "
+        "means the collection total/count is complete and authoritative - it does "
+        "NOT mean every result was delivered on the current page; treat "
+        "'has_more=true', 'next_offset' and 'next_start_line' as continuation "
+        "signals and page explicitly. Shell remains acceptable when the MCP does not "
         "provide the required operation or the operation is outside repository "
         "investigation. Perform reasoning in the client."
     ),
@@ -171,7 +175,7 @@ def mcquest_find_usages(
     max_results: Annotated[int, Field(description="Maximum number of references to return on this page. Defaults to 50 (hard cap 500).")] = 50,
     offset: Annotated[int, Field(description="Zero-based index of the first result to return on this page. Use the previous page's next_offset to continue. Defaults to 0. Page 2 is never returned automatically.")] = 0,
 ) -> str:
-    """READ ONLY. Find references to a symbol across the selected project's source files using word-boundary matching. Returns a summary (total, files_affected, returned, next_offset, has_more) followed by file:line:line-content, paged deterministically by (path, line). Use for discovering where a component, function, or variable is used."""
+    """READ ONLY. Find references to a symbol across the selected project's source files using word-boundary matching. Scan scope: TypeScript/TSX/JavaScript/JSX source files only (.ts, .tsx, .js, .jsx) under the search path; symbols used only in other languages report total: 0. Returns a summary (total, files_affected, returned, next_offset, has_more) followed by file:line:line-content, paged deterministically by (path, line). Use for discovering where a component, function, or variable is used."""
     return find_usages(
         symbol=symbol,
         path=path,
@@ -184,14 +188,16 @@ def mcquest_find_usages(
 @mcp.tool()
 def mcquest_pattern_audit(
     path: Annotated[str, Field(description="Project-relative directory to audit for responsive/layout patterns. Defaults to 'frontend/src'.")] = "frontend/src",
-    categories: Annotated[str, Field(description="Pattern category group to run, or 'all' for every category. Defaults to 'all'.")] = "all",
-    max_results_per_category: Annotated[int, Field(description="Maximum number of matches to return per category. Defaults to 100.")] = 100,
+    categories: Annotated[str, Field(description="Pattern category group to run, or 'all' for every category. Defaults to 'all' (summary counts + samples).")] = "all",
+    max_results_per_category: Annotated[int, Field(description="Maximum number of matches collected per category. Defaults to 100 (hard cap 500). Also bounds the single-category 'category' expansion.")] = 100,
+    category: Annotated[str, Field(description="Single pattern category to expand in detail (additive; overrides 'categories'). Valid values: viewport-width, large-min-width, large-fixed-width, nowrap, negative-horizontal-margin, horizontal-transform, negative-position, overflow-x, min-width, fixed-position, sticky-position. Defaults to '' (summary mode).")] = "",
 ) -> str:
-    """READ ONLY. Run predefined responsive/layout pattern searches in the selected project. Categories include: viewport-width, large-min-width, large-fixed-width, nowrap, negative-horizontal-margin, horizontal-transform, negative-position, overflow-x, min-width, fixed-position, sticky-position, or 'all'. Returns evidence only — no modifications. Use for auditing potential mobile/responsive issues."""
+    """READ ONLY. Run predefined responsive/layout pattern searches in the selected project. Default call returns a bounded summary-first report: a [SUMMARY] block plus [CATEGORY COUNTS] for every requested category and up to 2 sample matches per category, under the normal 4,000-character presentation budget (no uncontrolled category dump). collection_complete=true means every category's collected total is known; has_more=true means additional matches exist beyond the displayed samples. Use the additive 'category' parameter to expand a single category into up to max_results_per_category matches under the 16,000-character ceiling. Categories include: viewport-width, large-min-width, large-fixed-width, nowrap, negative-horizontal-margin, horizontal-transform, negative-position, overflow-x, min-width, fixed-position, sticky-position, or 'all'. category and categories values are validated against the fixed category enum. Returns evidence only — no modifications. Use for auditing potential mobile/responsive issues."""
     return pattern_audit(
         path=path,
         categories=categories,
         max_results_per_category=max_results_per_category,
+        category=category,
     )
 
 
@@ -260,7 +266,7 @@ def mcquest_phase_context(
     include_implementation: Annotated[bool, Field(description="Include implementation-report documents in results. Defaults to true.")] = True,
     include_audits: Annotated[bool, Field(description="Include audit documents in results. Defaults to true.")] = True,
 ) -> str:
-    """READ ONLY. Locate relevant phase/stage documentation. Use EITHER 'query' (free-text search, e.g. 'responsive overflow', 'Android') OR 'phase' (phase number, e.g. '61', '61-Part-II-A'). When 'phase' is provided, results are grouped by document type (implementation reports, audits, completions). Returns each match with its nearest heading, line numbers, and surrounding context. Preserves original evidence. Works for past and future phases."""
+    """READ ONLY. Locate relevant phase/stage documentation. Use EITHER 'query' (free-text search, e.g. 'responsive overflow', 'Android') OR 'phase' (phase identifier, e.g. '61', '61-Part-II-A'). Phase identifiers follow the project's phase-documentation naming convention: they are matched as 'phase-<id>' tokens in Markdown filenames under the documentation path (default 'docs'), so '61' matches files whose names contain a token like 'phase-61' or 'phase-61-part-ii-a'. When 'phase' is provided, results are grouped by document type (implementation reports, audits, completions). Returns each match with its nearest heading, line numbers, and surrounding context. 'No documentation found' means no filenames matched the phase name pattern. Preserves original evidence. Works for past and future phases."""
     return phase_context(
         query=query,
         phase=phase,
@@ -289,7 +295,7 @@ def mcquest_find_evidence(
     context_lines: Annotated[int, Field(description="Number of surrounding context lines to include per match. Bounded to 0-5. Defaults to 1.")] = 1,
     offset: Annotated[int, Field(description="Zero-based index of the first match to return on this page. Use the previous page's next_offset to continue. Defaults to 0. Page 2 is never returned automatically.")] = 0,
 ) -> str:
-    """READ ONLY. Search across code, documentation, and phase evidence in a single call. Returns a summary (total, files_affected, returned, next_offset, has_more, truncated) followed by a deterministic merged stream: code results first, then documentation results, each ordered by (path, line), sharing ONE page budget (never a per-scope limit). Scope can be 'code', 'docs', 'phase', or 'all'. Optionally filter by phase (phase results are doc-grouped and not paged). Use this instead of separately searching code and docs."""
+    """READ ONLY. Search across code, documentation, and phase evidence in a single call. Returns a summary (total, files_affected, counts, returned, next_offset, has_more, truncated, collection_complete, budget) followed by a deterministic merged stream: code results first, then documentation results, each ordered by (path, line), sharing ONE page budget (never a per-scope limit). The code stream scans .ts, .tsx, .js, .jsx, .css source files only; the docs stream scans Markdown under docs_path. collection_complete=true means the authoritative total/count is known -- it does NOT mean every result was delivered: when has_more=true, continue with next_offset. Scope can be 'code', 'docs', 'phase', or 'all'. Optionally filter by phase (phase results are doc-grouped and not paged). Use this instead of separately searching code and docs."""
     return find_evidence(
         query=query,
         phase=phase,
@@ -321,7 +327,7 @@ def mcquest_compare_phase(
     path: Annotated[str, Field(description="Project-relative documentation directory. Defaults to 'docs'.")] = "docs",
     max_results: Annotated[int, Field(description="Maximum number of documents to report per category. Defaults to 50.")] = 50,
 ) -> str:
-    """READ ONLY. Compare documentation between two phases. Returns document-set differences using evidence-neutral terminology: EXISTING, ADDED, REMOVED, COMMON, UNKNOWN. Document-existence/set diff only (not content verification). RUNTIME VERIFICATION: NOT PERFORMED. Use to understand which documentation documents appear in each phase."""
+    """READ ONLY. Compare documentation between two phases. Phase identifiers follow the project's phase-documentation naming convention: they are matched as 'phase-<id>' tokens in Markdown filenames under the documentation path (default 'docs'), so '61' matches files whose names contain a token like 'phase-61'. 'No documentation found' means no filenames matched either phase pattern. Returns document-set differences using evidence-neutral terminology: EXISTING, ADDED, REMOVED, COMMON, UNKNOWN. Document-existence/set diff only (not content verification). RUNTIME VERIFICATION: NOT PERFORMED. Use mcquest_read_doc to cross-check document content. Use to understand which documentation documents appear in each phase."""
     return compare_phase(
         from_phase=from_phase,
         to_phase=to_phase,

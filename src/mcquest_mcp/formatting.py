@@ -656,3 +656,135 @@ def search_block(
     else:
         budget.emit("[END]")
     return budget.finalize()
+
+
+# Phase 1 (v0.6 E1 carry-forward) pattern-audit renderer: ``audit_block()``.
+# Summary-first over the v0.5 budgets for the ``pattern_audit`` tool: a
+# ``[SUMMARY]`` header (category_count, matches, samples_shown, has_more,
+# truncated, collection_complete, budget) plus a ``[CATEGORY COUNTS]`` block
+# that always survives truncation, then per-category bounded sample blocks.
+# ``has_more`` signals collected matches beyond the displayed sample lines;
+# ``truncated`` signals a presentation-budget cut or clipped lines. The
+# single-category ``category`` parameter is the explicit expansion path.
+
+
+def audit_block(
+    tool: str,
+    path: str,
+    categories: list[str],
+    counts: list[int],
+    samples: list[list[str]],
+    fields: dict[str, object] | None = None,
+    scope: str = "",
+    normal: int = NORMAL_OUTPUT_CHARS,
+    ceiling: int = MAX_OUTPUT_CHARS,
+    expanded: bool = False,
+) -> str:
+    """Render a summary-first pattern-audit page under the v0.5 budgets.
+
+    ``categories`` / ``counts`` / ``samples`` are parallel lists in
+    deterministic category order. ``counts[i]`` is the collected match total
+    for category ``i`` and ``samples[i]`` the match lines to display for it
+    (a bounded written subset). A default call (``expanded=False``) uses the
+    ``normal`` (4000) presentation budget; an explicit expansion
+    (``expanded=True``, e.g. a single-category ``category`` request or an
+    enlarged ``max_results_per_category``) may use up to the ``ceiling``
+    (16000).
+    """
+    presentation = ceiling if expanded else normal
+    n = len(categories)
+    assert n == len(counts) == len(samples)
+
+    total_matches = sum(counts)
+    block_indices = [i for i in range(n) if samples[i]]
+    m = len(block_indices)
+
+    # Exact accounting over the deterministic sample blocks: rendered lengths,
+    # clip-dropped characters, raw (unclipped) lengths, and displayed-sample
+    # counts, so the fitted row count and every metadata field are exact.
+    rendered_block: list[str] = []
+    block_drop: list[int] = []
+    rendered_prefix = [0] * (m + 1)
+    drop_prefix = [0] * (m + 1)
+    raw_prefix = [0] * (m + 1)
+    for j, i in enumerate(block_indices, start=1):
+        raw_lines = samples[i]
+        clipped = [_clip_line(line, LINE_CLIP_CHARS) for line in raw_lines]
+        rendered = "## {}\n{}".format(categories[i], "\n".join(clipped))
+        raw_block = "## {}\n{}".format(categories[i], "\n".join(raw_lines))
+        rendered_block.append(rendered)
+        block_drop.append(len(raw_block) - len(rendered))
+        rendered_prefix[j] = rendered_prefix[j - 1] + len(rendered)
+        drop_prefix[j] = drop_prefix[j - 1] + block_drop[-1]
+        raw_prefix[j] = raw_prefix[j - 1] + len(raw_block)
+
+    shown_prefix = [0] * (m + 1)
+    for j, i in enumerate(block_indices, start=1):
+        shown_prefix[j] = shown_prefix[j - 1] + len(samples[i])
+
+    counts_block = "[CATEGORY COUNTS]\n" + "\n".join(
+        f"{name}: {count}" for name, count in zip(categories, counts)
+    )
+
+    def truncated_for(k: int) -> bool:
+        return drop_prefix[k] > 0 or k < m
+
+    def has_more_for(k: int) -> bool:
+        return total_matches > shown_prefix[k]
+
+    def summary_for(k: int) -> str:
+        fields_: dict[str, object] = {
+            "category_count": n,
+            "matches": total_matches,
+            "samples_shown": shown_prefix[k],
+            "has_more": "true" if has_more_for(k) else "false",
+            "truncated": "true" if truncated_for(k) else "false",
+            "collection_complete": "true",
+            "budget": f"{presentation}/{ceiling}",
+        }
+        merged: dict[str, object] = {}
+        if fields:
+            merged.update(fields)
+        merged.update(fields_)
+        return summary_block(tool, merged, scope=scope or f'path="{path}"')
+
+    def size_for(k: int) -> int:
+        """Exact rendered length for the first ``k`` sample blocks.
+
+        Mirrors ``OutputBudget.finalize()`` exactly: the summary header, the
+        ``[CATEGORY COUNTS]`` block, the body (sample blocks joined by single
+        newlines), and either the ``[END]`` trailer (not truncated) or the
+        truncation marker whose omitted count covers every unrendered block
+        (raw lengths) plus every clip-dropped character of rendered blocks.
+        """
+        body = rendered_prefix[k] + (k - 1 if k else 0)
+        header = summary_for(k) + "\n\n" + counts_block
+        trunk = len(header) + 2 + body
+        if truncated_for(k):
+            omitted = drop_prefix[k] + (raw_prefix[m] - raw_prefix[k])
+            marker = f"\n\n[OUTPUT TRUNCATED: {omitted:,} characters omitted]"
+            return trunk + len(marker)
+        return trunk + len("[END]") + (1 if k else 0)
+
+    # Largest sample-block count whose exact rendered length stays within the
+    # presentation budget (monotone except for a possible settle at m).
+    best = 0
+    for k in range(m + 1):
+        if size_for(k) <= presentation:
+            best = k
+
+    budget = OutputBudget(ceiling=presentation, clip=LINE_CLIP_CHARS)
+    budget.add_header(summary_for(best) + "\n\n" + counts_block)
+    for rendered in rendered_block[:best]:
+        if not budget.emit(rendered):
+            break
+    if best < m:
+        # Page cut by the presentation budget: every clip drop from rendered
+        # blocks plus every raw character of unrendered sample blocks.
+        budget.mark_truncated(drop_prefix[best] + (raw_prefix[m] - raw_prefix[best]))
+    elif drop_prefix[best] > 0:
+        # Every block rendered but at least one sample line was clipped.
+        budget.mark_truncated(drop_prefix[best])
+    else:
+        budget.emit("[END]")
+    return budget.finalize()

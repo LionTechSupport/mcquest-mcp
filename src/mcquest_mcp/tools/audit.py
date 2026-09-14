@@ -8,7 +8,7 @@ from ..config import (
     IGNORED_EXTENSIONS,
     MAX_SEARCH_RESULTS,
 )
-from ..formatting import truncate
+from ..formatting import audit_block
 from ..security import is_ignored_path, project_root, resolve_project_path
 
 
@@ -59,6 +59,12 @@ AUDIT_PATTERNS = {
     ),
 }
 
+AUDIT_CATEGORIES = tuple(AUDIT_PATTERNS.keys())
+"""Canonical ordered category enum (fixed set, deterministic ordering)."""
+
+DEFAULT_MAX_RESULTS_PER_CATEGORY = 100
+DEFAULT_SAMPLES_PER_CATEGORY = 2
+
 
 def _files(root: Path):
     for current_root, dirs, files in __import__("os").walk(root):
@@ -85,18 +91,109 @@ def _files(root: Path):
                         yield path
 
 
+def _select_category(category: str) -> dict[str, re.Pattern]:
+    """Validate a single ``category`` value against the fixed enum."""
+    if category not in AUDIT_PATTERNS:
+        raise ValueError(
+            "Unknown category: "
+            + category
+            + ". Valid categories: "
+            + ", ".join(AUDIT_CATEGORIES)
+            + "."
+        )
+    return {category: AUDIT_PATTERNS[category]}
+
+
+def _select_categories(categories: str) -> dict[str, re.Pattern]:
+    """Resolve the legacy comma-separated ``categories`` selector."""
+    if categories.strip().lower() == "all":
+        return AUDIT_PATTERNS
+
+    requested = {
+        item.strip()
+        for item in categories.split(",")
+        if item.strip()
+    }
+
+    unknown = requested - AUDIT_PATTERNS.keys()
+
+    if unknown:
+        raise ValueError(
+            "Unknown categories: "
+            + ", ".join(sorted(unknown))
+        )
+
+    # Deterministic canonical order (D009), regardless of input order.
+    return {
+        name: AUDIT_PATTERNS[name]
+        for name in AUDIT_CATEGORIES
+        if name in requested
+    }
+
+
+def _collect_matches(
+    root: Path,
+    regex: re.Pattern,
+    cap: int,
+) -> list[str]:
+    """Collect up to ``cap`` matches for one category (existing semantics).
+
+    Walks the same file set as the legacy implementation: ignored directories
+    and extensions pruned, ignored paths skipped, TS/TSX/JS/JSX/CSS files
+    only, exact ``relative:line: line`` evidence lines in walk order.
+    """
+    matches: list[str] = []
+
+    for file_path in _files(root):
+        try:
+            lines = file_path.read_text(
+                encoding="utf-8",
+                errors="replace",
+            ).splitlines()
+        except OSError:
+            continue
+
+        for line_number, line in enumerate(lines, start=1):
+            if not regex.search(line):
+                continue
+
+            relative = file_path.relative_to(
+                project_root()
+            ).as_posix()
+
+            matches.append(
+                f"{relative}:{line_number}: "
+                f"{line.strip()}"
+            )
+
+            if len(matches) >= cap:
+                return matches
+
+    return matches
+
+
 def pattern_audit(
     path: str = "frontend/src",
     categories: str = "all",
-    max_results_per_category: int = 100,
+    max_results_per_category: int = DEFAULT_MAX_RESULTS_PER_CATEGORY,
+    category: str = "",
 ) -> str:
-    """
-    Run a predefined MCQuest responsive/layout audit.
+    """Run a predefined responsive/layout audit, summary-first and bounded.
 
-    Categories:
-    viewport-width, large-min-width, large-fixed-width, nowrap,
-    negative-horizontal-margin, horizontal-transform, negative-position,
-    overflow-x, min-width, fixed-position, sticky-position, or all.
+    The default response is a bounded summary under the 4,000-character normal
+    presentation budget: a ``[SUMMARY]`` block (category_count, matches,
+    samples_shown, has_more, truncated, collection_complete, budget) followed
+    by the ``[CATEGORY COUNTS]`` table for every selected category and up to
+    ``DEFAULT_SAMPLES_PER_CATEGORY`` sample matches per category. The default
+    represents all categories without dumping their full match detail.
+
+    The additive ``category`` parameter is the explicit single-category
+    expansion: pass one enum value to list up to ``max_results_per_category``
+    matches for that category under the 16,000-character ceiling.
+    ``categories`` remains the legacy selector ('all' or a comma-separated
+    subset); when ``category`` is provided it wins. Both are validated against
+    the fixed category enum. Output is deterministic (fixed category order),
+    read-only, and confined to the project root.
     """
 
     max_results_per_category = min(
@@ -104,79 +201,44 @@ def pattern_audit(
         MAX_SEARCH_RESULTS,
     )
 
+    expanded = bool(category.strip()) or (
+        max_results_per_category > DEFAULT_MAX_RESULTS_PER_CATEGORY
+    )
+
     root = resolve_project_path(path)
 
     if not root.exists():
         raise FileNotFoundError(path)
 
-    if categories.strip().lower() == "all":
-        selected = AUDIT_PATTERNS
+    if category.strip():
+        selected = _select_category(category.strip())
     else:
-        requested = {
-            item.strip()
-            for item in categories.split(",")
-            if item.strip()
-        }
+        selected = _select_categories(categories)
 
-        unknown = requested - AUDIT_PATTERNS.keys()
-
-        if unknown:
-            raise ValueError(
-                "Unknown categories: "
-                + ", ".join(sorted(unknown))
-            )
-
-        selected = {
-            name: AUDIT_PATTERNS[name]
-            for name in requested
-        }
-
-    output: list[str] = []
-
-    for category, regex in selected.items():
-        matches: list[str] = []
-
-        for file_path in _files(root):
-            try:
-                lines = file_path.read_text(
-                    encoding="utf-8",
-                    errors="replace",
-                ).splitlines()
-            except OSError:
-                continue
-
-            for line_number, line in enumerate(
-                lines,
-                start=1,
-            ):
-                match = regex.search(line)
-
-                if not match:
-                    continue
-
-                relative = file_path.relative_to(
-                    project_root()
-                ).as_posix()
-
-                matches.append(
-                    f"{relative}:{line_number}: "
-                    f"{line.strip()}"
-                )
-
-                if len(matches) >= max_results_per_category:
-                    break
-
-            if len(matches) >= max_results_per_category:
-                break
-
-        output.append(
-            f"## {category}\n"
-            f"Matches: {len(matches)}\n"
-            + (
-                "\n".join(matches)
-                if matches
-                else "(none)"
-            )
+    counts: list[int] = []
+    samples: list[list[str]] = []
+    for name, regex in selected.items():
+        collected = _collect_matches(root, regex, max_results_per_category)
+        counts.append(len(collected))
+        sample_size = (
+            len(collected)
+            if expanded
+            else min(len(collected), DEFAULT_SAMPLES_PER_CATEGORY)
         )
+        samples.append(collected[:sample_size])
 
-    return truncate("\n\n".join(output))
+    fields: dict[str, object] = (
+        {"CATEGORY": category.strip()}
+        if category.strip()
+        else {"CATEGORIES": categories.strip() or "all"}
+    )
+
+    return audit_block(
+        tool="mcquest_pattern_audit",
+        path=path,
+        categories=list(selected.keys()),
+        counts=counts,
+        samples=samples,
+        fields=fields,
+        expanded=expanded,
+    )
