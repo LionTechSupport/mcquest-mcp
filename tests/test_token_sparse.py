@@ -30,9 +30,11 @@ import pytest
 from mcquest_mcp.config import LINE_CLIP_CHARS, MAX_OUTPUT_CHARS, NORMAL_OUTPUT_CHARS
 from mcquest_mcp.tools import (
     compare_phase,
+    component_inventory,
     find_evidence,
     find_files,
     find_imports,
+    find_strings,
     find_usages,
     git_context,
     list_docs,
@@ -86,6 +88,7 @@ def dirty_repo(write_file) -> None:
             f"src/c{i}.tsx",
             "import React from 'react';\n"
             f"const zetaSym = {i};\n"
+            + (f"function Component{i}() {{}}\n" + f"const Widget{i} = () => 1;\n") * 200
             + ("const x = '" + MATCH_LINE + "';\n") * 300,
         )
     write_file("src/style.css", "overflow-x: auto;\n" * 200 + WORD + "\n" * 5)
@@ -104,9 +107,11 @@ TOOL_SPECS = [
     ("list_docs", list_docs, {"path": "docs"}, {"path": "docs", "max_results": 300}, True),
     ("read_doc", read_doc, {"path": "docs/guide.md"}, {"path": "docs/phase-61-audit.md", "start_line": 1, "end_line": 1000}, True),
     ("find_files", find_files, {"query": "w-screen", "path": "src"}, {"query": "w-screen", "path": "many", "max_results": 300}, True),
-    ("search", search_text, {"pattern": WORD, "path": "src"}, {"pattern": ".", "path": "src", "context_lines": 3, "max_results": 500}, True),
+    ("search", search_text, {"pattern": WORD, "path": "src"}, {"pattern": ".", "path": "src", "context_lines": 3, "max_results": 500, "exclude_pattern": "zetaSym"}, True),
     ("search_docs", search_docs, {"pattern": WORD}, {"pattern": WORD, "max_results": 500, "context_lines": 5}, True),
     ("find_imports", find_imports, {"target": "react", "path": "src"}, {"target": "react", "path": "src", "max_results": 500}, True),
+    ("find_strings", find_strings, {"path": "src"}, {"path": "src", "max_results": 500}, True),
+    ("component_inventory", component_inventory, {"path": "src"}, {"path": "src", "max_results": 500}, True),
     ("find_usages", find_usages, {"symbol": "zetaSym", "path": "src"}, {"symbol": "zetaSym", "path": "src", "max_results": 500}, True),
     ("find_evidence", find_evidence, {"query": WORD, "path": "src"}, {"query": WORD, "scope": "all", "path": "src", "max_results": 500, "context_lines": 5}, True),
     ("phase_context", phase_context, {"query": WORD}, {"query": WORD, "max_results": 500, "context_lines": 5}, True),

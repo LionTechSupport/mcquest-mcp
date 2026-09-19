@@ -7,14 +7,17 @@ from pydantic import Field
 
 from .tools import (
     compare_phase,
+    component_inventory,
     diagnostics,
     find_evidence,
     find_files,
     find_imports,
+    find_strings,
     find_usages,
     git_context,
     list_docs,
     list_files,
+    locale_inspect,
     pattern_audit,
     phase_context,
     project_context,
@@ -39,8 +42,19 @@ mcp = MCPServer(
         "Markdown/documentation searches, mcquest_search for source-code regex "
         "searches, mcquest_find_files to locate files by name, "
         "mcquest_read_file / mcquest_read_doc to read known files, and "
-        "mcquest_find_usages / mcquest_find_imports for dependency/reference "
-        "investigation. Use mcquest_diagnostics for TypeScript/TSX/JavaScript/JSX "
+        "mcquest_find_usages / mcquest_find_imports for dependency/reference occurrence "
+        "investigation (textual matches only, not resolved symbols). Use mcquest_find_strings "
+        "to inventory quoted string "
+        "literals in JS/TS/JSX/TSX sources. Use mcquest_locale_inspect to inspect JSON "
+        "locale files for structure, duplicate keys, casefold collisions, and (with an "
+        "explicit reference file) MISSING/EXTRA key-path differences; with no reference it "
+        "performs structure/collision/duplicate inspection only and never infers a default "
+        "locale. Use mcquest_component_inventory to inventory lexical React "
+        "component candidates (function/arrow/class, path:line:Name + kind only) "
+        "in .js/.jsx/.ts/.tsx sources; its results are lexical candidates, not "
+        "verified components, and a zero result does not prove that no "
+        "components exist. Use mcquest_diagnostics for "
+        "TypeScript/TSX/JavaScript/JSX "
         "parser or compiler diagnostics; when the compiler/parser has already "
         "identified an error location, use it instead of reading the entire "
         "large source file. In every tool output, 'collection_complete=true' "
@@ -122,8 +136,9 @@ def mcquest_search(
     context_lines: Annotated[int, Field(description="Number of surrounding context lines to include per match. Bounded to 0-3. Defaults to 1.")] = 1,
     max_results: Annotated[int, Field(description="Maximum number of matches to return on this page. Defaults to 50 (hard cap 500).")] = 50,
     offset: Annotated[int, Field(description="Zero-based index of the first match to return on this page. Use the previous page's next_offset to continue. Defaults to 0. Page 2 is never returned automatically.")] = 0,
+    exclude_pattern: Annotated[str, Field(description="Optional regular expression applied per line to drop matching lines from results (exclude wins on overlap with pattern; honors case_sensitive; applied to both the count and the page). Supports regex alternation, e.g. 'foo|bar'. Defaults to '' (no exclusion).")] = "",
 ) -> str:
-    """READ ONLY. Search source files in the selected project using a regular expression. Returns a summary (total, files_affected, returned, next_offset, has_more, truncated) followed by matching lines with limited surrounding context, paged deterministically by (path, line). Use for source-code pattern searches; use mcquest_search_docs for Markdown/documentation searches."""
+    """READ ONLY. Search source files in the selected project using a regular expression. Returns a summary (total, files_affected, returned, next_offset, has_more, truncated) followed by matching lines with limited surrounding context, paged deterministically by (path, line). Optionally pass exclude_pattern to filter matching lines out of the results. Use for source-code pattern searches; use mcquest_search_docs for Markdown/documentation searches."""
     return search_text(
         pattern=pattern,
         path=path,
@@ -132,6 +147,7 @@ def mcquest_search(
         context_lines=context_lines,
         max_results=max_results,
         offset=offset,
+        exclude_pattern=exclude_pattern,
     )
 
 
@@ -168,16 +184,68 @@ def mcquest_find_imports(
 
 
 @mcp.tool()
+def mcquest_find_strings(
+    path: Annotated[str, Field(description="Project-relative file or directory to scan for string literals. Defaults to 'frontend/src'.")] = "frontend/src",
+    file_pattern: Annotated[str, Field(description="Glob pattern filtering which files to scan by basename (directory mode only). Defaults to '*' (all files).")] = "*",
+    min_length: Annotated[int, Field(description="Minimum literal length to report; suppresses short strings such as empty quotes. Defaults to 1 (bounds 0..100).")] = 1,
+    max_results: Annotated[int, Field(description="Maximum number of literals to return on this page. Defaults to 50 (hard cap 500).")] = 50,
+    offset: Annotated[int, Field(description="Zero-based index of the first literal to return on this page. Use the previous page's next_offset to continue. Defaults to 0. Page 2 is never returned automatically.")] = 0,
+) -> str:
+    """READ ONLY. Enumerate quoted string literals in JS/TS/JSX/TSX source files as deterministic bounded evidence. Lexical literal-inventory primitive: finds quoted '...', "...", and template-literal static segments; NOT a hardcoded-UI-string detector and NOT AST-based, so a zero-result response does NOT prove the absence of user-facing text and quoted literals inside comments may be returned. JSX text nodes are out of scope. Returns a summary (total, files_affected, returned, offset, next_offset, has_more, truncated, collection_complete, budget) followed by one page of at most max_results path:line:col: "value" lines ordered deterministically by (path, line, col). collection_complete=true means the authoritative total is known -- it does NOT mean every result was delivered: when has_more=true, continue with next_offset. Use this instead of ad-hoc regex searches when you need exact literal values and positions in .js, .jsx, .ts, .tsx sources."""
+    return find_strings(
+        path=path,
+        file_pattern=file_pattern,
+        min_length=min_length,
+        max_results=max_results,
+        offset=offset,
+    )
+
+
+@mcp.tool()
 def mcquest_find_usages(
-    symbol: Annotated[str, Field(description="Symbol name to find references for (word-boundary matched).")],
+    symbol: Annotated[str, Field(description="Identifier to match by whole-word lexical equality (word-boundary). Matches are textual occurrences, not resolved references; declarations, comments, and string literals count. See tool description for scope.")],
     path: Annotated[str, Field(description="Project-relative directory to search. Defaults to 'frontend/src'.")] = "frontend/src",
     file_pattern: Annotated[str, Field(description="Glob pattern filtering which files to search. Defaults to '*' (all files).")] = "*",
     max_results: Annotated[int, Field(description="Maximum number of references to return on this page. Defaults to 50 (hard cap 500).")] = 50,
     offset: Annotated[int, Field(description="Zero-based index of the first result to return on this page. Use the previous page's next_offset to continue. Defaults to 0. Page 2 is never returned automatically.")] = 0,
 ) -> str:
-    """READ ONLY. Find references to a symbol across the selected project's source files using word-boundary matching. Scan scope: TypeScript/TSX/JavaScript/JSX source files only (.ts, .tsx, .js, .jsx) under the search path; symbols used only in other languages report total: 0. Returns a summary (total, files_affected, returned, next_offset, has_more) followed by file:line:line-content, paged deterministically by (path, line). Use for discovering where a component, function, or variable is used."""
+    """READ ONLY. Find lexical word-boundary matches for an identifier across the selected project's source files. Textual only, NOT semantic: no import, alias, module, scope, or language resolution; every line containing the identifier as a whole word is a match — declarations, comments, and string literals all count. Scan scope: TypeScript/TSX/JavaScript/JSX source files only (.ts, .tsx, .js, .jsx) under the search path; symbols used only in other languages report total: 0. Returns a summary (total, files_affected, returned, next_offset, has_more) followed by file:line:line-content, paged deterministically by (path, line). Use to locate all spelling occurrences of an identifier; pair with mcquest_find_imports and mcquest_read_file to reason about real reference relationships."""
     return find_usages(
         symbol=symbol,
+        path=path,
+        file_pattern=file_pattern,
+        max_results=max_results,
+        offset=offset,
+    )
+
+
+@mcp.tool()
+def mcquest_locale_inspect(
+    path: Annotated[str, Field(description="Project-relative directory to inspect JSON locale files under, or a single .json file. Defaults to the project root.")] = ".",
+    reference: Annotated[str, Field(description="Project-relative path of the reference locale file for MISSING/EXTRA comparison. Defaults to '' (structure/collision/duplicate inspection only; no default locale is inferred).")] = "",
+    file_pattern: Annotated[str, Field(description="Glob pattern filtering which files to include; matches the basename. Defaults to '*.json'.")] = "*.json",
+    max_results: Annotated[int, Field(description="Maximum number of rows to return on this page. Defaults to 50 (hard cap 500).")] = 50,
+    offset: Annotated[int, Field(description="Zero-based index of the first row to return on this page. Use the previous page's next_offset to continue. Defaults to 0. Page 2 is never returned automatically.")] = 0,
+) -> str:
+    """READ ONLY. Inspect JSON locale files (.json only) for structure, duplicate keys, casefold collisions (e.g. 'Strasse' vs 'Straße'), and — only with an explicit reference file — MISSING/EXTRA key-path differences (MISSING = present in reference, absent in target; EXTRA = present in target, absent in reference). reference='' means structure/collision/duplicate inspection only; no default locale is ever inferred. Duplicate-preserving parse: duplicate keys are detected at effective object nodes over the full syntactic pair list, the effective structure follows the last occurrence, and duplicates inside shadowed earlier subtrees are never traversed or reported. Paths render JSON-quoted keys and [i] array indices ('0' is a string key, [0] an array index — never confused); the root renders <root>. Ordered deterministically (files by relative-path bytes; rows by typed path then type STRUCTURE/COLLISION/MISSING/EXTRA/DUP/ERROR) under per-file (3000) and global (5000) row caps; once the global cap is exhausted the tool switches to counting mode and reports exact FINDINGS_OMITTED cardinalities instead of materializing rows. Failed files produce explicit ERROR rows (READ/DECODE/OVERSIZED/DEPTH/PARSE/IDENTITY) and are disclosed via FINDINGS_UNKNOWN / files_not_examined; incomplete enumeration reports files_not_examined_unknown with ENUM_LIMIT or ENUM_REASON instead of exact totals. collection_complete=false whenever comparisons are disabled (no reference or failed reference) or the scan is incomplete — it does NOT mean every row was delivered (see has_more/next_offset). Returns a [SUMMARY] block followed by 'relative: ROW' evidence lines, paged over the collected rows."""
+    return locale_inspect(
+        path=path,
+        reference=reference,
+        file_pattern=file_pattern,
+        max_results=max_results,
+        offset=offset,
+    )
+
+
+@mcp.tool()
+def mcquest_component_inventory(
+    path: Annotated[str, Field(description="Project-relative directory to scan for component candidates, or a single .js/.jsx/.ts/.tsx file. Defaults to the project root. A single-file path with an unsupported extension (including .d.ts) is rejected.")] = ".",
+    file_pattern: Annotated[str, Field(description="Glob pattern filtering which files to include; matches the basename. Defaults to '' (the .js/.jsx/.ts/.tsx allowlist only).")] = "",
+    max_results: Annotated[int, Field(description="Maximum number of rows to return on this page. Defaults to 50 (hard cap 500).")] = 50,
+    offset: Annotated[int, Field(description="Zero-based index of the first row to return on this page. Use the previous page's next_offset to continue. Defaults to 0. Page 2 is never returned automatically.")] = 0,
+) -> str:
+    """READ ONLY. Inventory lexical React component candidates in JS/TS sources (.js, .jsx, .ts, .tsx only) and return 'relative_path:line: Name (kind)' rows where kind is one of function, arrow, or class. Results are LEXICAL CANDIDATES, not verified React components: false positives and false negatives are possible, and comments and strings are NOT stripped (a declaration-shaped match inside a comment or string is still emitted). Anonymous default declarations are skipped; class kinds are not gated on a React base class; names must match ASCII [A-Z][A-Za-z0-9_]* case-sensitively. .d.ts files are excluded. A zero result does NOT prove that no components exist — lowercase-named components, HOC wrappers, multi-line declarations, re-exports, and files outside the supported extensions are all missed. Rows are deduplicated and ordered deterministically by (relative_path, line, name, kind) with explicit paging (has_more/next_offset); collection_complete is true only when no in-scope file was skipped (oversized/unreadable) and no file-count cap was reached — it does NOT mean every row was delivered. Returns a [SUMMARY] block followed by 'relative_path:line: Name (kind)' evidence lines, paged over the deduplicated rows."""
+    return component_inventory(
         path=path,
         file_pattern=file_pattern,
         max_results=max_results,

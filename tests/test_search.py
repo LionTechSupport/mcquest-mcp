@@ -8,6 +8,17 @@ collection_complete, budget) followed by one explicit page of at most
 defaults to ``SEARCH_DEFAULT_RESULTS`` (50) with a hard cap of 500, the
 per-match context is capped at ``SEARCH_CONTEXT_CAP_CODE`` (3), lines are
 clipped at 200 chars, and oversized (>2MB) files are skipped.
+
+Stage 1 (V0.7) additionally proves ``exclude_pattern``:
+- calls omitting ``exclude_pattern`` reproduce the pre-change bytes exactly
+  (the fixed ``BASELINE_OUTPUT`` below was captured 2026-09-17 from the
+  Stage 1 pre-implementation build);
+- omitting vs. passing ``""`` are byte-identical;
+- exclusion filters lines in BOTH count and page passes so ``total`` and
+  ``files_affected`` are post-exclusion and paging stays contiguous;
+- exclusion wins on overlap, composes with ``file_pattern`` and
+  ``case_sensitive``, preserves context rendering around kept matches,
+  echoes ``EXCLUDE`` only when set, and keeps 4000/16000/200 behavior.
 """
 
 from __future__ import annotations
@@ -19,6 +30,40 @@ import pytest
 
 from mcquest_mcp.config import MAX_FILE_BYTES
 from mcquest_mcp.tools.search import search_text
+
+# Fixed pre-change byte-for-byte baseline for ``search_text`` captured via
+# ``_capture_baseline.py`` (2026-09-17) from the Stage 1 pre-implementation
+# working tree with the exact fixture in
+# ``test_baseline_output_unchanged_without_exclude``. A call OMITTING
+# ``exclude_pattern`` MUST reproduce these exact bytes; any rendering or
+# summary drift fails that test.
+BASELINE_OUTPUT: str = """[SUMMARY]
+tool: mcquest_search
+scope: path="src"
+PATTERN: targetWord
+PATH: src
+total: 4
+files_affected: 3
+returned: 4
+offset: 0
+has_more: false
+truncated: false
+collection_complete: true
+budget: 4000/16000
+[EVIDENCE]
+
+src/app.ts:1
+  1: import { targetWord } from './lib';
+  2: const keep = 'targetWord';
+src/app.ts:2
+  1: import { targetWord } from './lib';
+  2: const keep = 'targetWord';
+  3: const skipMe = 1;
+src/lib.ts:1
+  1: export const targetWord = 'x';
+src/other.py:1
+  1: targetWord = 42
+[END]"""
 
 
 def summary_of(output: str) -> dict[str, str]:
@@ -49,8 +94,6 @@ def context_numbers(output: str) -> list[int]:
     """Line numbers rendered in snippet context lines."""
     body = output.partition("[EVIDENCE]")[2]
     return [int(n) for n in re.findall(r"^  (\d+):", body, re.M)]
-
-
 def test_summary_first_with_echo_fields_and_trailer(write_file) -> None:
     write_file("src/app.ts", "const targetName = 1;\n")
     write_file("src/lib.ts", "const other = 2;\n")
@@ -115,6 +158,8 @@ def test_max_results_hard_cap_is_500_with_16000_budget(write_file) -> None:
     assert search_text(
         pattern="a", path="src", context_lines=0, max_results=500
     ) == out
+
+
 def test_order_deterministic_sorted_by_path_then_line(write_file) -> None:
     write_file("src/z.ts", "targetName\n")
     write_file("src/a.ts", "targetName\nx\ntargetName\n")
@@ -211,3 +256,192 @@ def test_2mb_file_skip_guard(repo, write_file) -> None:
     s = summary_of(out)
     assert s["total"] == "1"
     assert locations(out) == [("src/small.ts", 1)]
+# --- Stage 1: exclude_pattern (additive, backward-compatible) -------------
+
+
+def test_baseline_output_unchanged_without_exclude(write_file) -> None:
+    """Byte-for-byte fixture: omitting exclude_pattern == pre-change bytes."""
+    write_file(
+        "src/app.ts",
+        "import { targetWord } from './lib';\n"
+        "const keep = 'targetWord';\n"
+        "const skipMe = 1;\n",
+    )
+    write_file("src/lib.ts", "export const targetWord = 'x';\n")
+    write_file("src/other.py", "targetWord = 42\n")
+
+    out = search_text(pattern="targetWord", path="src")
+
+    assert out == BASELINE_OUTPUT
+    assert len(out) == 503
+
+
+def test_omitted_and_empty_exclude_identical(write_file) -> None:
+    """Omitting exclude_pattern and passing '' produce byte-identical output."""
+    write_file("src/app.ts", "targetWord\n")
+
+    omitted = search_text(pattern="targetWord", path="src")
+    explicit_empty = search_text(pattern="targetWord", path="src", exclude_pattern="")
+
+    assert omitted == explicit_empty
+    assert "EXCLUDE" not in omitted
+    assert "EXCLUDE" not in explicit_empty
+
+
+def test_exclude_pattern_returns_only_non_excluded(write_file) -> None:
+    write_file(
+        "src/app.ts",
+        "first targetWord\n"
+        "skipMe targetWord\n"
+        "third targetWord\n",
+    )
+
+    out = search_text(pattern="targetWord", path="src", exclude_pattern="^skipMe")
+
+    s = summary_of(out)
+    assert s["total"] == "2"
+    assert s["files_affected"] == "1"
+    assert locations(out) == [("src/app.ts", 1), ("src/app.ts", 3)]
+
+
+def test_exclude_pattern_wins_on_overlap(write_file) -> None:
+    """A line matching both pattern and exclude_pattern is excluded."""
+    write_file("src/app.ts", "targetWord shared\nplain other\n")
+
+    out = search_text(pattern="targetWord", path="src", exclude_pattern="shared")
+
+    s = summary_of(out)
+    assert s["total"] == "0"
+    assert s["files_affected"] == "0"
+    assert locations(out) == []
+
+
+def test_exclude_pattern_zero_total_truthful_page(write_file) -> None:
+    write_file("src/app.ts", "targetWord\n")
+
+    out = search_text(
+        pattern="targetWord", path="src", exclude_pattern="targetWord"
+    )
+
+    s = summary_of(out)
+    assert s["total"] == "0"
+    assert s["returned"] == "0"
+    assert s["has_more"] == "false"
+    assert "next_offset" not in s
+    assert out.rstrip().endswith("[END]")
+def test_exclude_pattern_paging_contiguous(write_file) -> None:
+    # 12 lines: every 3rd line is "targetWord", rest "skipMe targetWord" →
+    # matches (after exclusion) at lines 1, 4, 7, 10 → total 4.
+    write_file(
+        "src/app.ts",
+        "".join(
+            "targetWord\n" if i % 3 == 1 else "skipMe targetWord\n"
+            for i in range(1, 13)
+        ),
+    )
+
+    p1 = search_text(
+        pattern="targetWord",
+        path="src",
+        context_lines=0,
+        max_results=2,
+        offset=0,
+        exclude_pattern="^skipMe",
+    )
+    p2 = search_text(
+        pattern="targetWord",
+        path="src",
+        context_lines=0,
+        max_results=2,
+        offset=2,
+        exclude_pattern="^skipMe",
+    )
+
+    assert summary_of(p1)["total"] == "4"
+    assert summary_of(p1)["next_offset"] == "2"
+    assert summary_of(p2)["has_more"] == "false"
+    assert "next_offset" not in summary_of(p2)
+    assert locations(p1) + locations(p2) == [
+        ("src/app.ts", 1),
+        ("src/app.ts", 4),
+        ("src/app.ts", 7),
+        ("src/app.ts", 10),
+    ]
+
+
+def test_exclude_pattern_composes_with_file_pattern(write_file) -> None:
+    write_file("src/a.ts", "targetWord\n")
+    write_file("src/b.ts", "targetWord bOnly\n")
+    write_file("src/c.txt", "targetWord\n")
+
+    out = search_text(
+        pattern="targetWord",
+        path="src",
+        file_pattern="*.ts",
+        exclude_pattern="bOnly",
+    )
+
+    # c.txt is out by glob; b.ts's matching line is out by exclude; only
+    # a.ts line 1 survives.
+    s = summary_of(out)
+    assert s["total"] == "1"
+    assert s["files_affected"] == "1"
+    assert locations(out) == [("src/a.ts", 1)]
+
+
+def test_exclude_pattern_honors_case_sensitive(write_file) -> None:
+    write_file("src/app.ts", "targetWord\nTARGETWORD\n")
+
+    # Default case-insensitive exclude: both lines match both regexes → 0.
+    out_ci = search_text(pattern="targetWord", path="src", exclude_pattern="TARGETWORD")
+    assert summary_of(out_ci)["total"] == "0"
+
+    # case_sensitive=True: pattern only matches "targetWord"; exclude only
+    # matches "TARGETWORD" → the lowercase line survives.
+    out_cs = search_text(
+        pattern="targetWord",
+        path="src",
+        case_sensitive=True,
+        exclude_pattern="TARGETWORD",
+    )
+    assert summary_of(out_cs)["total"] == "1"
+    assert locations(out_cs) == [("src/app.ts", 1)]
+
+
+def test_exclude_pattern_invalid_regex_raises_value_error(write_file) -> None:
+    write_file("src/app.ts", "x\n")
+
+    with pytest.raises(ValueError, match="Invalid exclude_pattern regex"):
+        search_text(pattern="x", path="src", exclude_pattern="[")
+
+
+def test_exclude_pattern_context_unchanged_around_kept_match(write_file) -> None:
+    # The excluded line is not a match, so the kept match's context window
+    # (lines 1..3) must be rendered exactly as before (unchanged context).
+    write_file("src/app.ts", "a\ntargetWord\nskipMe\nc\n")
+
+    out = search_text(pattern="targetWord", path="src", exclude_pattern="^skipMe")
+
+    assert locations(out) == [("src/app.ts", 2)]
+    assert context_numbers(out) == [1, 2, 3]
+
+
+def test_exclude_pattern_echoed_in_summary_only_when_set(write_file) -> None:
+    write_file("src/app.ts", "targetWord\n")
+
+    without = search_text(pattern="targetWord", path="src")
+    assert "EXCLUDE" not in without
+
+    with_excl = search_text(pattern="targetWord", path="src", exclude_pattern="skipMe")
+    assert "EXCLUDE: skipMe" in with_excl
+
+
+def test_exclude_pattern_default_budget_still_applies(write_file) -> None:
+    write_file("src/app.ts", ("x" * 150 + " targetWord\n") * 60)
+
+    out = search_text(pattern="targetWord", path="src", exclude_pattern="unusedMatch")
+
+    assert len(out) <= 4000
+    assert summary_of(out)["budget"] == "4000/16000"
+    assert summary_of(out)["total"] == "60"
+    assert "[OUTPUT TRUNCATED" in out

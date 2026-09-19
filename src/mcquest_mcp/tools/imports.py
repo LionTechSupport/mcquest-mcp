@@ -180,13 +180,17 @@ def find_usages(
     offset: int = 0,
 ) -> str:
     """
-    Find textual references to a symbol across source files.
+    Find lexical word-boundary matches for a symbol identifier across source
+    files (.ts/.tsx/.js/.jsx only). Textual scan, NOT reference-resolved: no
+    import, alias, module, scope, or language semantic resolution; every
+    whole-word occurrence — declarations, comments, and string literals — is
+    a match. This is a lexical tool, not an AST/symbol reference resolver.
 
     Summary-first and explicitly paged: returns a canonical ``[SUMMARY]``
     block (total, files_affected, returned, offset, next_offset, has_more,
     truncated, budget) followed by one page of at most ``max_results``
     matching lines ordered deterministically by (relative_path ASC, line ASC).
-    Searches identifiers rather than arbitrary substrings.
+    Searches whole-word identifier spellings rather than arbitrary substrings.
     """
 
     max_results = min(max(max_results, 1), MAX_SEARCH_RESULTS)

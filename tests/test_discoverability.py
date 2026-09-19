@@ -83,6 +83,76 @@ def test_search_description_is_generic_and_distinguished_from_docs() -> None:
     assert "selected project" in desc
     assert "mcquest_search_docs" in desc
 
+def test_search_exclude_pattern_parameter_described() -> None:
+    """Stage 1: exclude_pattern is exposed with actionable, accurate docs."""
+    props = _tool("mcquest_search").input_schema["properties"]
+    assert "exclude_pattern" in props
+    description = props["exclude_pattern"]["description"]
+    assert "regex" in description
+    assert "overlap" in description
+    assert "case_sensitive" in description
+    assert "Defaults to ''" in description
+    assert props["exclude_pattern"]["default"] == ""
+
+
+def test_component_inventory_description_states_lexical_candidate_honesty() -> None:
+    """Stage 4: the component inventory is unmistakably lexical, not verified."""
+    desc = _tool("mcquest_component_inventory").description
+
+    # Read-only identity and the supported extension set.
+    assert desc.startswith("READ ONLY.")
+    assert ".js, .jsx, .ts, .tsx" in desc
+    assert ".d.ts files are excluded" in desc
+
+    # The five binding description requirements (spec section 11).
+    assert "LEXICAL CANDIDATES" in desc
+    assert "false positives and false negatives are possible" in desc
+    assert "comments and strings are NOT stripped" in desc
+    assert "zero result does NOT prove that no components exist" in desc
+    assert "function, arrow, or class" in desc
+
+    # Approved semantics that must not silently drift.
+    assert "Anonymous default declarations are skipped" in desc
+    assert "not gated on a React base class" in desc
+    assert "ASCII [A-Z][A-Za-z0-9_]* case-sensitively" in desc
+    assert "deduplicated" in desc
+    assert "collection_complete" in desc
+    assert "does NOT mean every row was delivered" in desc
+
+
+def test_component_inventory_parameter_descriptions_and_schema() -> None:
+    props = _tool("mcquest_component_inventory").input_schema["properties"]
+    for param in ("path", "file_pattern", "max_results", "offset"):
+        description = props[param].get("description")
+        assert isinstance(description, str) and description.strip(), param
+    assert props["path"]["default"] == "."
+    assert props["file_pattern"]["default"] == ""
+    assert props["max_results"]["default"] == 50
+    assert props["offset"]["default"] == 0
+
+
+def test_locale_inspect_description_states_json_and_reference_semantics() -> None:
+    """Stage 3: the JSON locale inspector is unmistakable and honest."""
+    desc = _tool("mcquest_locale_inspect").description
+    # Read-only identity and JSON-only scope.
+    assert desc.startswith("READ ONLY.")
+    assert ".json" in desc
+    # Reference semantics: explicit only, never an inferred default locale.
+    assert "reference='' means structure/collision/duplicate inspection only" in desc
+    assert "no default locale is ever inferred" in desc
+    # MISSING/EXTRA direction is spelled out.
+    assert "MISSING = present in reference, absent in target" in desc
+    assert "EXTRA = present in target, absent in reference" in desc
+    # Duplicate-preserving parse + last-occurrence effective structure.
+    assert "Duplicate-preserving parse" in desc
+    assert "effective structure follows the last occurrence" in desc
+    assert "shadowed earlier subtrees" in desc
+    # Typed-path display honesty: "0" vs [0].
+    assert "'0' is a string key, [0] an array index" in desc
+    # Honest completeness: comparisons disabled => collection_complete=false.
+    assert (
+        "collection_complete=false whenever comparisons are disabled" in desc
+    )
 
 def test_no_tool_description_claims_mcquest_only_scope() -> None:
     for tool in asyncio.run(mcp.list_tools()):
@@ -115,6 +185,19 @@ def test_find_usages_description_states_scan_scope() -> None:
     assert ".ts, .tsx, .js, .jsx" in desc
     assert "TypeScript/TSX/JavaScript/JSX" in desc
     assert "other languages report total: 0" in desc
+    # Stage 2: the lexical-not-semantic ceiling must be unmistakable.
+    assert "lexical word-boundary matches" in desc
+    assert "NOT semantic" in desc
+    assert "declarations, comments, and string literals" in desc
+    assert "no import, alias, module, scope, or language resolution" in desc
+
+
+def test_find_usages_symbol_parameter_states_lexical_honesty() -> None:
+    props = _tool("mcquest_find_usages").input_schema["properties"]
+    symbol = props["symbol"]["description"]
+    assert "word-boundary" in symbol
+    assert "not resolved references" in symbol
+    assert "declarations, comments, and string literals" in symbol
 
 
 def test_find_evidence_description_states_code_stream_language_scope() -> None:

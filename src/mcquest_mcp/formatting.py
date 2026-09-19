@@ -560,19 +560,26 @@ def search_block(
     normal: int = NORMAL_OUTPUT_CHARS,
     ceiling: int = MAX_OUTPUT_CHARS,
     expanded: bool = False,
+    collection_complete: bool = True,
 ) -> str:
     """Render a summary-first search/evidence page under the v0.5 budgets.
 
     Used by ``mcquest_search`` / ``mcquest_search_docs`` /
     ``mcquest_find_imports`` / ``mcquest_find_usages`` /
     ``mcquest_find_evidence`` and the ``phase_context`` query mode (decisions
-    D001/D002/D004/D007/D008/D009/D016).
+    D001/D002/D004/D007/D008/D009/D016), and by ``mcquest_locale_inspect``
+    (V0.7 Stage 3).
 
     Each ``item`` is a multi-line snippet (e.g. ``path:line`` plus context).
     During accounting and emission every line of the item is clipped at
     ``LINE_CLIP_CHARS`` while the item's internal newline structure is
     preserved, and the complete rendered item is emitted atomically: an
     over-budget snippet is dropped whole, never split mid-line or mid-snippet.
+
+    ``collection_complete`` (V0.7 Stage 3) lets a caller honestly report a
+    non-authoritative collection (e.g. comparisons disabled or truncated
+    enumeration); it defaults to ``True`` so every existing call site keeps
+    its byte-for-byte output.
     """
     presentation = ceiling if expanded else normal
     n = len(items)
@@ -609,7 +616,9 @@ def search_block(
             fields_["next_offset"] = offset + k
         fields_["has_more"] = "true" if has_more else "false"
         fields_["truncated"] = "true" if truncated_for(k) else "false"
-        fields_["collection_complete"] = "true"
+        fields_["collection_complete"] = (
+            "true" if collection_complete else "false"
+        )
         fields_["budget"] = f"{presentation}/{ceiling}"
         merged: dict[str, object] = {}
         if fields:

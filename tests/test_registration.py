@@ -1,6 +1,10 @@
-"""Regression: exactly the 17 approved MCP tools remain registered.
+"""Regression: exactly the 20 approved MCP tools remain registered.
 
-No tool may be added, renamed, or removed by the v0.3/v0.4 changes.
+No tool may be added, renamed, or removed beyond the approved set. V0.7
+Phase 2 (DEC-008) added ``mcquest_find_strings`` (literal inventory).
+V0.7 Stage 3 (DEC-012) added ``mcquest_locale_inspect`` (JSON locale
+inspection). V0.7 Stage 4 (DEC-013 updated + DEC-014) added
+``mcquest_component_inventory`` (lexical component inventory).
 """
 
 from __future__ import annotations
@@ -12,14 +16,17 @@ from mcquest_mcp.server import mcp
 
 EXPECTED_TOOLS = [
     "mcquest_compare_phase",
+    "mcquest_component_inventory",
     "mcquest_diagnostics",
     "mcquest_find_evidence",
     "mcquest_find_files",
     "mcquest_find_imports",
+    "mcquest_find_strings",
     "mcquest_find_usages",
     "mcquest_git_context",
     "mcquest_list_docs",
     "mcquest_list_files",
+    "mcquest_locale_inspect",
     "mcquest_pattern_audit",
     "mcquest_phase_context",
     "mcquest_project_context",
@@ -31,11 +38,11 @@ EXPECTED_TOOLS = [
 ]
 
 
-def test_exactly_17_tools_remain_registered() -> None:
+def test_exactly_20_tools_remain_registered() -> None:
     tools = asyncio.run(mcp.list_tools())
     names = sorted(tool.name for tool in tools)
     assert names == EXPECTED_TOOLS
-    assert len(names) == 17
+    assert len(names) == 20
 
 
 def test_mcquest_read_file_parameter_descriptions_and_semantics() -> None:

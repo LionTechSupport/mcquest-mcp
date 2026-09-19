@@ -132,3 +132,26 @@ def test_2mb_file_skip_guard(repo, write_file) -> None:
     s = summary_of(out)
     assert s["total"] == "1"
     assert locations(out) == [("src/small.ts", 1)]
+
+
+def test_comments_strings_and_declarations_are_matches(write_file) -> None:
+    """Stage 2: whole-word occurrences are lexical matches — declarations,
+    comments, string literals all count; semantics are not consulted."""
+
+    write_file(
+        "src/app.tsx",
+        "// targetName mentioned in a comment\n"
+        'const label = "targetName inside a string";\n'
+        "const targetName = 1;\n"
+        "otherName();\n",
+    )
+
+    out = find_usages(symbol="targetName", path="src")
+
+    s = summary_of(out)
+    assert s["total"] == "3"
+    assert locations(out) == [
+        ("src/app.tsx", 1),
+        ("src/app.tsx", 2),
+        ("src/app.tsx", 3),
+    ]

@@ -94,6 +94,7 @@ def search_text(
     context_lines: int = 1,
     max_results: int = SEARCH_DEFAULT_RESULTS,
     offset: int = 0,
+    exclude_pattern: str = "",
 ) -> str:
     """
     Search source files with a regex and return exact file/line evidence.
@@ -105,6 +106,13 @@ def search_text(
     ``(relative_path ASC, line ASC)``. Results never exceed the 4,000-char
     normal presentation budget (default calls) or the 16,000-char absolute
     ceiling (explicit pages); every snippet line is clipped to 200 chars.
+
+    ``exclude_pattern`` (optional) is a second regex applied per line to drop
+    matching lines from the results (exclude wins on overlap with ``pattern``).
+    It is applied in BOTH the count pass and the page pass, honors the same
+    ``case_sensitive`` flag as ``pattern``, composes with ``file_pattern``
+    (both must pass), and is echoed in the summary as ``EXCLUDE`` only when
+    non-empty. ``""`` (default) means no exclusion.
     """
 
     max_results = min(max(max_results, 1), MAX_SEARCH_RESULTS)
@@ -125,6 +133,21 @@ def search_text(
     except re.error as exc:
         raise ValueError(f"Invalid regex: {exc}") from exc
 
+    exclude = None
+    if exclude_pattern:
+        try:
+            exclude = re.compile(exclude_pattern, flags)
+        except re.error as exc:
+            raise ValueError(f"Invalid exclude_pattern regex: {exc}") from exc
+
+    def _keeps(line: str) -> bool:
+        """A line is a result iff it matches ``pattern`` and not ``exclude``."""
+        if not regex.search(line):
+            return False
+        if exclude is not None and exclude.search(line):
+            return False
+        return True
+
     # Pass 1: authoritative full count (approved two-pass full-count) so
     # ``total`` / ``files_affected`` are truthful and collection_complete is
     # always true.
@@ -133,7 +156,7 @@ def search_text(
 
     for file_path in _iter_search_files(root, file_pattern):
         lines = _read_lines(file_path)
-        matches = sum(1 for line in lines if regex.search(line))
+        matches = sum(1 for line in lines if _keeps(line))
         if matches:
             total += matches
             files_affected += 1
@@ -149,7 +172,7 @@ def search_text(
                     _read_lines(file_path),
                     start=1,
                 ):
-                    if regex.search(line):
+                    if _keeps(line):
                         yield (relative, index)
 
         needed = min(offset + page_size, total)
@@ -164,6 +187,12 @@ def search_text(
             cache[relative] = _read_lines(resolve_project_path(relative))
         items.append(_build_snippet(relative, line_no, cache[relative], context_lines))
 
+    # Summary fields: EXCLUDE echoed only when set, so default output remains
+    # byte-identical to the pre-exclude_pattern build.
+    summary_fields: dict[str, object] = {"PATTERN": pattern, "PATH": path}
+    if exclude_pattern:
+        summary_fields["EXCLUDE"] = exclude_pattern
+
     return search_block(
         tool="mcquest_search",
         path=path,
@@ -171,6 +200,6 @@ def search_text(
         total=total,
         files_affected=files_affected,
         offset=offset,
-        fields={"PATTERN": pattern, "PATH": path},
+        fields=summary_fields,
         expanded=offset > 0 or max_results > SEARCH_DEFAULT_RESULTS,
     )
