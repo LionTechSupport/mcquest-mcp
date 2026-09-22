@@ -8,6 +8,9 @@ from .git_context import git_context
 from .imports import find_imports, find_usages
 from .locales import locale_inspect
 from .strings import find_strings
+from .ui_contract import ui_contract_audit
+from .ui_doc_gap import doc_gap_audit
+from .ui_text import find_ui_text
 from .project import project_info
 from .search import search_text
 
@@ -32,4 +35,7 @@ __all__ = [
     "find_evidence",
     "git_context",
     "compare_phase",
+    "find_ui_text",
+    "doc_gap_audit",
+    "ui_contract_audit",
 ]

@@ -241,3 +241,60 @@ def test_server_instructions_clarify_collection_complete_semantics() -> None:
     assert "collection_complete=true" in text
     assert "NOT mean every result" in text
     assert "'has_more=true'" in text
+
+
+# --- V0.8 audit tools (DEC-020) ----------------------------------------------
+
+
+def test_ui_contract_audit_description_is_discoverable_for_prop_drift() -> None:
+    """Cline should select mcquest_ui_contract_audit for component-prop drift."""
+    desc = _tool("mcquest_ui_contract_audit").description
+
+    assert desc.startswith("READ ONLY.")
+    for trigger in (
+        "prop contracts",
+        ".js/.jsx/.ts/.tsx",
+        "missing_prop",
+        "stale_prop",
+        "mismatched_usage",
+        "signature_drift",
+        "unverifiable",
+        "DEC-022",
+        "DEC-023",
+        "DEC-031",
+        "risk is never emitted",
+        "heuristic",
+        "A zero result means no lexical findings",
+    ):
+        assert trigger in desc, f"description missing trigger {trigger!r}"
+    assert "MCQuest project" not in desc
+
+
+def test_server_instructions_mention_the_v0_8_audit_tools() -> None:
+    text = mcp.instructions
+    assert "mcquest_find_ui_text" in text
+    assert "mcquest_ui_contract_audit" in text
+    assert "mcquest_doc_gap_audit" in text
+
+
+def test_doc_gap_audit_description_is_discoverable_for_stale_doc_references() -> None:
+    """Cline should select mcquest_doc_gap_audit for stale documentation references."""
+    desc = _tool("mcquest_doc_gap_audit").description
+
+    assert desc.startswith("READ ONLY.")
+    for trigger in (
+        "stale_reference",
+        "backtick-delimited",
+        "path-like",
+        ".md/.markdown/.mdown/.mkd",
+        "DEC-033",
+        "2000",
+        "500",
+        "collection_complete",
+        "heuristic",
+        "NOT EMITTABLE",
+        "bounded scan only",
+        "repository-global total",
+    ):
+        assert trigger in desc, f"description missing trigger {trigger!r}"
+    assert "MCQuest project" not in desc

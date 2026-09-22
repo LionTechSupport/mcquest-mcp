@@ -9,10 +9,12 @@ from .tools import (
     compare_phase,
     component_inventory,
     diagnostics,
+    doc_gap_audit,
     find_evidence,
     find_files,
     find_imports,
     find_strings,
+    find_ui_text,
     find_usages,
     git_context,
     list_docs,
@@ -26,6 +28,7 @@ from .tools import (
     read_file,
     search_docs,
     search_text,
+    ui_contract_audit,
 )
 
 
@@ -45,7 +48,29 @@ mcp = MCPServer(
         "mcquest_find_usages / mcquest_find_imports for dependency/reference occurrence "
         "investigation (textual matches only, not resolved symbols). Use mcquest_find_strings "
         "to inventory quoted string "
-        "literals in JS/TS/JSX/TSX sources. Use mcquest_locale_inspect to inspect JSON "
+        "literals in JS/TS/JSX/TSX sources. Use mcquest_find_ui_text to inventory "
+        "quoted string literals and template-literal static segments as lexical "
+        "UI-text candidates in .js/.jsx/.ts/.tsx sources with conservative "
+        "DEC-032 classification (no-ASCII-letter literals are decorative; "
+        "letter-bearing literals are unknown while the brand/admin lists are "
+        "unrecorded); JSX text nodes are not extracted and a zero result does "
+        "not prove absence. Use mcquest_ui_contract_audit to audit component "
+        "prop contracts lexically in .js/.jsx/.ts/.tsx sources: declared "
+        "props at component definitions versus prop keys passed at call "
+        "sites, with issue categories missing_prop/stale_prop/"
+        "mismatched_usage/signature_drift/unverifiable, heuristic severity "
+        "and confidence labels, and unverifiable rows for spread or "
+        "non-enumerable cases; risk is never emitted. Use mcquest_doc_gap_audit "
+        "to audit documentation against the bounded code scan lexically: "
+        "eligible stale_reference carriers are inline backtick-span content "
+        "and path-like tokens with a recognized source/doc extension (prose "
+        "identifiers are never candidates by shape alone); the only currently "
+        "emittable issue type is stale_reference (warning, heuristic "
+        "confidence); missing_doc/conflicting_reference/status_mismatch, "
+        "consistency rows, and risk are never emitted; "
+        "collection_complete=false plus a NOTE appears only when a scan cap "
+        "or an unterminated fence prevents full inspection. "
+        "Use mcquest_locale_inspect to inspect JSON "
         "locale files for structure, duplicate keys, casefold collisions, and (with an "
         "explicit reference file) MISSING/EXTRA key-path differences; with no reference it "
         "performs structure/collision/duplicate inspection only and never infers a default "
@@ -196,6 +221,58 @@ def mcquest_find_strings(
         path=path,
         file_pattern=file_pattern,
         min_length=min_length,
+        max_results=max_results,
+        offset=offset,
+    )
+
+
+@mcp.tool()
+def mcquest_find_ui_text(
+    path: Annotated[str, Field(description="Project-relative directory or single file to scan. Defaults to the project root '.'.")] = ".",
+    file_pattern: Annotated[str, Field(description="Glob pattern filtering which files to scan by basename (directory mode only). Defaults to '*' (all files).")] = "*",
+    max_results: Annotated[int, Field(description="Maximum number of candidate rows to return on this page. Defaults to 50 (hard cap 500).")] = 50,
+    offset: Annotated[int, Field(description="Zero-based index of the first candidate to return on this page. Use the previous page's next_offset to continue. Defaults to 0. Page 2 is never returned automatically.")] = 0,
+    classify: Annotated[bool, Field(description="Whether to return classification labels (DEC-032). Defaults to true; when false, rows carry only the location and snippet.")] = True,
+) -> str:
+    """READ ONLY. Find lexical UI-text candidates (quoted string literals and template-literal static segments) in .js/.jsx/.ts/.tsx sources. Lexical-only per DEC-015/DEC-032: NOT a parser-based or semantic UI-text detector, so a zero-result response does NOT prove the absence of user-facing text; JSX text nodes are not extracted and quoted literals on comment lines may appear (the scanner has no comment awareness). Classification (DEC-032): a literal with no ASCII letter ([A-Za-z]) is decorative (confidence high); a literal with one or more ASCII letters is unknown (confidence medium) with a reason naming the missing brand-token list and admin-marker list; localizable/brand/admin-only are NOT emitted and are never inferred by elimination. When classify=false, rows carry only the location and snippet and the summary is unchanged. Returns a summary (total, files_affected, returned, offset, next_offset, has_more, truncated, collection_complete, budget) followed by one page of at most max_results file:line evidence rows ordered deterministically by (path, line, col). collection_complete=true means the authoritative total is known -- it does NOT mean every result was delivered: when has_more=true, continue with next_offset."""
+    return find_ui_text(
+        path=path,
+        file_pattern=file_pattern,
+        max_results=max_results,
+        offset=offset,
+        classify=classify,
+    )
+
+
+@mcp.tool()
+def mcquest_ui_contract_audit(
+    path: Annotated[str, Field(description="Project-relative directory or single file to scan. Defaults to the project root '.'.")] = ".",
+    component_pattern: Annotated[str, Field(description="Glob pattern filtering which files to scan by basename (directory mode only). Defaults to '*' (all files).")] = "*",
+    include_callers: Annotated[bool, Field(description="Whether call-site-anchored rows are included. Defaults to true; when false, only definition-anchored rows are reported.")] = True,
+    max_results: Annotated[int, Field(description="Maximum number of issue rows to return on this page. Defaults to 50 (hard cap 500).")] = 50,
+    offset: Annotated[int, Field(description="Zero-based index of the first issue row to return on this page. Use the previous page's next_offset to continue. Defaults to 0. Page 2 is never returned automatically.")] = 0,
+) -> str:
+    """READ ONLY. Audit component prop contracts lexically in .js/.jsx/.ts/.tsx sources: declared props at component definitions versus prop keys passed at call sites, with issue categories missing_prop/stale_prop/mismatched_usage/signature_drift/unverifiable (DEC-018). Strictly lexical (no parser, no symbol resolution); severity and confidence are heuristic labels (DEC-017), never facts: missing_prop is critical only when all in-scope call sites are accounted for, every one omits the prop, and every one is fully evaluable, otherwise warning (DEC-022); stale_prop is warning only against a fully available definition (exactly one definition site, lexically enumerable prop set) and unverifiable otherwise (DEC-023); mismatched_usage and signature_drift are warning (DEC-031); unverifiable is always info severity and low confidence and is never critical. risk is never emitted (DEC-025). A zero result means no lexical findings in the scanned scope and never proves contract correctness. Returns a summary (total, files_affected, returned, offset, next_offset, has_more, truncated, collection_complete, budget) followed by one page of at most max_results multi-line issue rows ordered by (path, line). collection_complete=true means the authoritative total is known -- it does NOT mean every result was delivered: when has_more=true, continue with next_offset."""
+    return ui_contract_audit(
+        path=path,
+        component_pattern=component_pattern,
+        include_callers=include_callers,
+        max_results=max_results,
+        offset=offset,
+    )
+
+
+@mcp.tool()
+def mcquest_doc_gap_audit(
+    docs_path: Annotated[str, Field(description="Project-relative Markdown scope (`.md`, `.markdown`, `.mdown`, `.mkd`) to audit, or a single in-boundary Markdown file. Defaults to the project root. Root confinement applies.")] = ".",
+    code_path: Annotated[str, Field(description="Project-relative code scope (`.js`, `.jsx`, `.ts`, `.tsx`) to compare documentation tokens against, or a single in-boundary code file. Defaults to the project root. Root confinement applies.")] = ".",
+    max_results: Annotated[int, Field(description="Maximum number of issue rows to return on this page. Defaults to 50 (hard cap 500).")] = 50,
+    offset: Annotated[int, Field(description="Zero-based index of the first issue row to return on this page. Use the previous page's next_offset to continue. Defaults to 0. Page 2 is never returned automatically.")] = 0,
+) -> str:
+    """READ ONLY. Audit documentation tokens against the bounded code scan lexically in .md/.markdown/.mdown/.mkd (docs side) and .js/.jsx/.ts/.tsx (code side). Strictly lexical (no parser, no symbol resolution, no maintained symbol list). Eligible stale_reference carriers (DEC-033) are the content of a backtick-delimited inline Markdown span and path-like tokens containing '/' with a recognized source or documentation extension; the identifier form [A-Za-z_][A-Za-z0-9_]* is a tokenizer WITHIN those carriers only, so ordinary prose words are never candidates by identifier shape alone. The only currently emittable issue type is stale_reference (severity warning, heuristic per DEC-017; confidence high only when the bounded code scan completed uncapped, otherwise medium -- DEC-025/DEC-033). missing_doc/conflicting_reference/status_mismatch, consistency rows, and risk are NOT EMITTABLE. Bounded scan (DEC-016/DEC-033): MAX_ENUMERATE_FILES=2000 / MAX_FILES_ANALYZED=500; collection_complete=false plus an incomplete-collection NOTE only when a scan cap (or an unterminated fence) prevents full inspection; total counts findings within the bounded scan only and never claims a repository-global total when capped. Returns a summary (total, files_affected, returned, offset, next_offset, has_more, truncated, collection_complete, budget) followed by one page of at most max_results multi-line issue rows ordered deterministically by (docs relative_path, doc line, code relative_path)."""
+    return doc_gap_audit(
+        docs_path=docs_path,
+        code_path=code_path,
         max_results=max_results,
         offset=offset,
     )
