@@ -10,6 +10,7 @@ from .tools import (
     component_inventory,
     diagnostics,
     doc_gap_audit,
+    feature_impact_audit,
     find_evidence,
     find_files,
     find_imports,
@@ -70,6 +71,17 @@ mcp = MCPServer(
         "consistency rows, and risk are never emitted; "
         "collection_complete=false plus a NOTE appears only when a scan cap "
         "or an unterminated fence prevents full inspection. "
+        "Use mcquest_feature_impact_audit to review "
+        "lexical change-impact evidence for a target across .js/.jsx/.ts/.tsx "
+        "code, .md/.markdown/.mdown/.mkd documentation (include_docs, default "
+        "true), and .json locale keys/references (include_locales, default "
+        "true): impacted files/affected docs/locale keys-or-references rows "
+        "with a lexical reason plus a review checklist (suggestions only, "
+        "never facts); severity, risk, and confidence are never emitted; "
+        "bounded scan (MAX_ENUMERATE_FILES=2000 / MAX_FILES_ANALYZED=500) "
+        "sets collection_complete=false plus an incomplete-collection NOTE "
+        "only when a scan cap prevents full inspection, and total counts "
+        "findings within the bounded scan only. "
         "Use mcquest_locale_inspect to inspect JSON "
         "locale files for structure, duplicate keys, casefold collisions, and (with an "
         "explicit reference file) MISSING/EXTRA key-path differences; with no reference it "
@@ -275,6 +287,26 @@ def mcquest_doc_gap_audit(
         code_path=code_path,
         max_results=max_results,
         offset=offset,
+    )
+
+
+@mcp.tool()
+def mcquest_feature_impact_audit(
+    target: Annotated[str, Field(description="File, symbol, route, or feature name whose change-impact references are audited. Matched lexically (word-boundary, plus import-module and string-literal evidence composed per DEC-019). Required; must be non-empty.")],
+    path: Annotated[str, Field(description="Project-relative scope root (directory) or a single in-boundary file (.js/.jsx/.ts/.tsx, .md/.markdown/.mdown/.mkd, or .json). Defaults to the project root. Root confinement applies.")] = ".",
+    max_results: Annotated[int, Field(description="Maximum number of impact rows to return on this page. Defaults to 50 (hard cap 500).")] = 50,
+    offset: Annotated[int, Field(description="Zero-based index of the first impact row to return on this page. Use the previous page's next_offset to continue. Defaults to 0. Page 2 is never returned automatically.")] = 0,
+    include_docs: Annotated[bool, Field(description="Whether documentation impact (.md/.markdown/.mdown/.mkd) is included. Defaults to true; when false, documentation impact is excluded (DEC-034).")] = True,
+    include_locales: Annotated[bool, Field(description="Whether locale impact (.json keys/references) is included. Defaults to true; when false, locale impact is excluded (DEC-034).")] = True,
+) -> str:
+    """READ ONLY. Determine which files/docs/locales may be affected by a change to a target, composing existing primitives only (DEC-019): lexical word-boundary find_usages, find_imports, find_strings, locale key-position lookups, and the shared walk/readers over .js/.jsx/.ts/.tsx code, .md/.markdown/.mdown/.mkd documentation, and .json locale files (DEC-019 boundary union). include_docs and include_locales are optional booleans defaulting to true (DEC-034); when false, that impact dimension is excluded. Rows are review items, not asserted issues: no severity field, no issue-type/classification enum, no confidence field, and no risk field (DEC-025); each row carries file:line, a kind (impacted file / affected doc / locale key or reference), a reason (the lexical evidence), and an evidence line, and the summary carries a REVIEW_CHECKLIST that is a review suggestion only, never a fact. Bounded scan (DEC-016/DEC-035): MAX_ENUMERATE_FILES=2000 / MAX_FILES_ANALYZED=500 for the unified scan (no separate code/document/locale caps); collection_complete=false plus an incomplete-collection NOTE only when a scan cap or a skipped file prevents full inspection; total counts findings within the bounded scan only and never claims a repository-global total when capped; truncated (output budget) stays separate from collection_complete (DEC-028). Returns a summary (total, files_affected, returned, offset, next_offset, has_more, truncated, collection_complete, budget, TARGET, PATH, INCLUDE_DOCS, INCLUDE_LOCALES, REVIEW_CHECKLIST) followed by one page of at most max_results rows ordered deterministically by (relative_path, line), with explicit offset pagination only (no automatic page 2). A zero result never proves absence of feature impact."""
+    return feature_impact_audit(
+        target=target,
+        path=path,
+        max_results=max_results,
+        offset=offset,
+        include_docs=include_docs,
+        include_locales=include_locales,
     )
 
 

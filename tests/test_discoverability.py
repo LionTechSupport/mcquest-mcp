@@ -275,6 +275,7 @@ def test_server_instructions_mention_the_v0_8_audit_tools() -> None:
     assert "mcquest_find_ui_text" in text
     assert "mcquest_ui_contract_audit" in text
     assert "mcquest_doc_gap_audit" in text
+    assert "mcquest_feature_impact_audit" in text
 
 
 def test_doc_gap_audit_description_is_discoverable_for_stale_doc_references() -> None:
@@ -295,6 +296,42 @@ def test_doc_gap_audit_description_is_discoverable_for_stale_doc_references() ->
         "NOT EMITTABLE",
         "bounded scan only",
         "repository-global total",
+    ):
+        assert trigger in desc, f"description missing trigger {trigger!r}"
+    assert "MCQuest project" not in desc
+
+def test_feature_impact_audit_description_is_discoverable_for_change_impact() -> None:
+    """Cline should select mcquest_feature_impact_audit for change-impact review."""
+    desc = _tool("mcquest_feature_impact_audit").description
+
+    assert desc.startswith("READ ONLY.")
+    for trigger in (
+        "which files/docs/locales may be affected",
+        "DEC-019",
+        ".js/.jsx/.ts/.tsx",
+        ".md/.markdown/.mdown/.mkd",
+        ".json locale files",
+        "include_docs",
+        "include_locales",
+        "DEC-034",
+        "DEC-035",
+        "MAX_ENUMERATE_FILES=2000",
+        "MAX_FILES_ANALYZED=500",
+        "no separate code/document/locale caps",
+        "collection_complete",
+        "bounded scan only",
+        "repository-global total",
+        "impacted file / affected doc / locale key or reference",
+        "reason",
+        "evidence",
+        "REVIEW_CHECKLIST",
+        "no severity field",
+        "no confidence field",
+        "no risk field",
+        "DEC-025",
+        "explicit offset pagination only",
+        "no automatic page 2",
+        "A zero result never proves absence of feature impact",
     ):
         assert trigger in desc, f"description missing trigger {trigger!r}"
     assert "MCQuest project" not in desc

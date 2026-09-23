@@ -6,8 +6,10 @@ V0.7 Stage 3 (DEC-012) added ``mcquest_locale_inspect`` (JSON locale
 inspection). V0.7 Stage 4 (DEC-013 updated + DEC-014) added
 ``mcquest_component_inventory`` (lexical component inventory).
 
-V0.8 (DEC-020/DEC-032/DEC-031/DEC-033): ``mcquest_find_ui_text`` and
-``mcquest_ui_contract_audit``, and ``mcquest_doc_gap_audit`` are implemented (23 registered tools); the expected count reaches 24 when the remaining approved V0.8 tool (``mcquest_feature_impact_audit``) is implemented.
+V0.8 (DEC-020/DEC-032/DEC-031/DEC-033/DEC-034/DEC-035): ``mcquest_find_ui_text``,
+``mcquest_ui_contract_audit``, ``mcquest_doc_gap_audit``, and
+``mcquest_feature_impact_audit`` are implemented (24 registered tools; the
+expected count is reached with the last approved V0.8 tool).
 """
 
 from __future__ import annotations
@@ -22,6 +24,7 @@ EXPECTED_TOOLS = [
     "mcquest_component_inventory",
     "mcquest_diagnostics",
     "mcquest_doc_gap_audit",
+    "mcquest_feature_impact_audit",
     "mcquest_find_evidence",
     "mcquest_find_files",
     "mcquest_find_imports",
@@ -44,11 +47,11 @@ EXPECTED_TOOLS = [
 ]
 
 
-def test_exactly_23_tools_remain_registered() -> None:
+def test_exactly_24_tools_remain_registered() -> None:
     tools = asyncio.run(mcp.list_tools())
     names = sorted(tool.name for tool in tools)
     assert names == EXPECTED_TOOLS
-    assert len(names) == 23
+    assert len(names) == 24
 
 
 def test_mcquest_read_file_parameter_descriptions_and_semantics() -> None:
@@ -182,3 +185,49 @@ def test_mcquest_doc_gap_audit_parameter_descriptions_and_semantics() -> None:
     assert properties["max_results"]["type"] == "integer"
     assert properties["offset"]["default"] == 0
     assert properties["offset"]["type"] == "integer"
+
+
+def test_mcquest_feature_impact_audit_parameter_descriptions_and_semantics() -> None:
+    """mcquest_feature_impact_audit exposes a description per parameter
+    (DEC-019/DEC-034/DEC-035)."""
+    tools = asyncio.run(mcp.list_tools())
+    tool = next(t for t in tools if t.name == "mcquest_feature_impact_audit")
+    properties = tool.input_schema["properties"]
+
+    for param in (
+        "target",
+        "path",
+        "max_results",
+        "offset",
+        "include_docs",
+        "include_locales",
+    ):
+        assert param in properties
+        description = properties[param].get("description")
+        assert isinstance(description, str) and description.strip(), (
+            f"{param} missing a non-empty description"
+        )
+
+    # Preserved schema semantics (DEC-034/DEC-035: the six approved inputs
+    # only, ``target`` is the sole required input, and never a ``feature_scope``
+    # input).
+    assert set(properties) == {
+        "target",
+        "path",
+        "max_results",
+        "offset",
+        "include_docs",
+        "include_locales",
+    }
+    assert tool.input_schema.get("required", []) == ["target"]
+    assert properties["target"]["type"] == "string"
+    assert properties["path"]["type"] == "string"
+    assert properties["path"]["default"] == "."
+    assert properties["max_results"]["default"] == 50
+    assert properties["max_results"]["type"] == "integer"
+    assert properties["offset"]["default"] == 0
+    assert properties["offset"]["type"] == "integer"
+    assert properties["include_docs"]["default"] is True
+    assert properties["include_docs"]["type"] == "boolean"
+    assert properties["include_locales"]["default"] is True
+    assert properties["include_locales"]["type"] == "boolean"
