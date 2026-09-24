@@ -31,6 +31,12 @@ from .tools import (
     search_text,
     ui_contract_audit,
 )
+from .tools.shell_env import (
+    shell_capabilities,
+    shell_context,
+    shell_environment,
+    shell_terminal,
+)
 
 
 mcp = MCPServer(
@@ -511,6 +517,71 @@ def mcquest_compare_phase(
         path=path,
         max_results=max_results,
     )
+
+
+# --- V0.9 P2 shell-intelligence tools (decision A11: registered in phases) --
+
+@mcp.tool()
+def mcquest_shell_environment(
+    client_session: Annotated[str, Field(description="Optional client-declared terminal session id (CLIENT_DECLARED; not verified). Empty string = not declared.")] = "",
+    client_process_id: Annotated[str, Field(description="Optional client-declared terminal process id (CLIENT_DECLARED; not verified). Empty string = not declared.")] = "",
+    client_cwd: Annotated[str, Field(description="Optional client-declared terminal working directory (CLIENT_DECLARED; corroborated only when it resolves inside the project root). Empty string = not declared.")] = "",
+    client_shell: Annotated[str, Field(description="Optional client-declared terminal shell family, e.g. 'PowerShell' (CLIENT_DECLARED; not verified). Empty string = not declared.")] = "",
+    client_shell_version: Annotated[str, Field(description="Optional client-declared terminal shell version (CLIENT_DECLARED; not verified). Empty string = not declared.")] = "",
+) -> str:
+    """READ ONLY. Assemble the V0.9 Environment Contract with source/trust/scope/freshness labels: project root, OS/Python (stdlib), executable presence (shutil.which), and versions from approved fixed-argv read-only probes (git, node, pwsh -Version, and the fixed PowerShell 5.1 version literal). Probe failures report UNKNOWN, never fabricated or stale values; server process facts are labeled subject=mcp_server and are never presented as the client's terminal state. Returns a summary-first, bounded report."""
+    return shell_environment(
+        client_session=client_session,
+        client_process_id=client_process_id,
+        client_cwd=client_cwd,
+        client_shell=client_shell,
+        client_shell_version=client_shell_version,
+    )
+
+
+@mcp.tool()
+def mcquest_shell_terminal(
+    client_session: Annotated[str, Field(description="Optional client-declared terminal session id (CLIENT_DECLARED; not verified). Empty string = not declared.")] = "",
+    client_process_id: Annotated[str, Field(description="Optional client-declared terminal process id (CLIENT_DECLARED; not verified). Empty string = not declared.")] = "",
+    client_cwd: Annotated[str, Field(description="Optional client-declared terminal working directory (CLIENT_DECLARED; corroborated only when it resolves inside the project root). Empty string = not declared.")] = "",
+    client_shell: Annotated[str, Field(description="Optional client-declared terminal shell family, e.g. 'PowerShell' (CLIENT_DECLARED; not verified). Empty string = not declared.")] = "",
+    client_shell_version: Annotated[str, Field(description="Optional client-declared terminal shell version (CLIENT_DECLARED; not verified). Empty string = not declared.")] = "",
+) -> str:
+    """READ ONLY. Report terminal/session/process identity, clearly separating the MCP server's own process (subject=mcp_server) from the client terminal. Undeclared client fields report value=unknown / source=UNKNOWN / trust=untrusted (degraded cold start, decision S1); identity-scoped facts are never promoted across sessions or processes, and no client terminal state is ever fabricated from server facts. Returns a summary-first, bounded report."""
+    return shell_terminal(
+        client_session=client_session,
+        client_process_id=client_process_id,
+        client_cwd=client_cwd,
+        client_shell=client_shell,
+        client_shell_version=client_shell_version,
+    )
+
+
+@mcp.tool()
+def mcquest_shell_context(
+    client_session: Annotated[str, Field(description="Optional client-declared terminal session id (CLIENT_DECLARED; not verified). Empty string = not declared.")] = "",
+    client_process_id: Annotated[str, Field(description="Optional client-declared terminal process id (CLIENT_DECLARED; not verified). Empty string = not declared.")] = "",
+    client_cwd: Annotated[str, Field(description="Optional client-declared terminal working directory (CLIENT_DECLARED; corroborated only when it resolves inside the project root). Empty string = not declared.")] = "",
+    client_shell: Annotated[str, Field(description="Optional client-declared terminal shell family, e.g. 'PowerShell' (CLIENT_DECLARED; not verified). Empty string = not declared.")] = "",
+    client_shell_version: Annotated[str, Field(description="Optional client-declared terminal shell version (CLIENT_DECLARED; not verified). Empty string = not declared.")] = "",
+) -> str:
+    """READ ONLY. Return the compact V0.9 shell-intelligence context assembled from known P1/P2 state: repository, worktree (explicitly unknown when unobserved), server process (subject=mcp_server), client terminal, environment, freshness/trust counts, explicit unknowns, and standing directives. Unavailable information is reported as UNKNOWN; no confidence score and no completeness claim is produced. Returns a summary-first, bounded report."""
+    return shell_context(
+        client_session=client_session,
+        client_process_id=client_process_id,
+        client_cwd=client_cwd,
+        client_shell=client_shell,
+        client_shell_version=client_shell_version,
+    )
+
+
+@mcp.tool()
+def mcquest_shell_capabilities(
+    offset: Annotated[int, Field(description="Zero-based index of the first capability row to return on this page. Use the previous page's next_offset to continue. Defaults to 0.")] = 0,
+    max_results: Annotated[int, Field(description="Maximum number of capability rows (3 lines each) to return on this page. Bounded to 1-10 so one page stays within the 4000-character default budget. Defaults to 10.")] = 10,
+) -> str:
+    """READ ONLY. Expose the V0.9 capability registry with intent metadata (decision A12): every implemented tool with purpose, family (V0.8 repository intelligence vs V0.9 shell intelligence), phase, read-only status, execution class, operation classes, and prerequisites, followed by clearly labeled PLANNED rows that are not registered and not executable. The pinned EXPECTED_TOOLS list remains the registration authority; this registry never registers anything. Returns summary-first deterministic output, paged."""
+    return shell_capabilities(offset=offset, max_results=max_results)
 
 
 def main() -> None:
