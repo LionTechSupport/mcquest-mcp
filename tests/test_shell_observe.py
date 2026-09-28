@@ -231,13 +231,14 @@ def test_observe_adapter_applies_invalidation() -> None:
 
 # --- registration (A11/A12) -------------------------------------------------
 
-def test_exactly_two_p4_tools_are_registered() -> None:
+def test_p4_tools_stay_registered_after_p5() -> None:
+    # P5 added plan/prepare/history/next; the P4 pair must stay registered.
     names = sorted(tool.name for tool in asyncio.run(mcp.list_tools()))
-    assert len(names) == 30
+    assert len(names) == 34
     for name in P4_TOOLS:
         assert name in names
     for name in P5_TOOLS:
-        assert name not in names
+        assert name in names
 
 
 def test_no_separate_lint_tool_exists() -> None:

@@ -21,8 +21,7 @@ P3_MODULES = {
     "hygiene.py",
     "redundancy.py",
 }
-FUTURE_TOOLS = {
-    # P5 only: P4 implemented validate + observe, so they left this set.
+P5_TOOLS = {
     "mcquest_shell_plan",
     "mcquest_shell_prepare",
     "mcquest_shell_history",
@@ -36,29 +35,27 @@ def _p3_sources() -> list[Path]:
 
 
 def test_exactly_the_eight_authorized_p3_modules_exist() -> None:
-    # The eight P3 analyzers are frozen and unchanged; P4 added new modules
-    # beside them rather than editing or replacing any of them.
+    # The eight P3 analyzers are frozen and unchanged; P4 and P5 added new
+    # modules beside them rather than editing or replacing any of them.
     assert {path.name for path in _p3_sources() if path.exists()} == P3_MODULES
-    # P5 planning is still NOT implemented (decision A11 phased registration).
-    assert not (SHELL / "planner.py").exists()
     assert (SHELL / "validate.py").exists()  # added by P4, not by P3
+    assert (SHELL / "planner.py").exists()  # added by P5, not by P3
 
 
-def test_p3_registers_no_tools_and_the_surface_is_exactly_30() -> None:
+def test_the_surface_is_exactly_34_after_p5() -> None:
     # A11 phased registration: 24 -> 28 (P2) -> 30 (P4) -> 34 (P5).
     names = sorted(tool.name for tool in asyncio.run(mcp.list_tools()))
     assert names == EXPECTED_TOOLS
-    assert len(names) == 30
+    assert len(names) == 34
     assert P4_TOOLS <= set(names)
-    assert set(names).isdisjoint(FUTURE_TOOLS)
+    assert P5_TOOLS <= set(names)
 
 
-def test_only_the_two_authorized_p4_tools_are_registered() -> None:
+def test_only_the_ten_authorized_shell_tools_are_registered() -> None:
     names = {tool.name for tool in asyncio.run(mcp.list_tools())}
     assert not any(name.startswith("mcquest_shell_analyze") for name in names)
-    assert names.isdisjoint(FUTURE_TOOLS)  # no P5 tool may exist yet
     shell_tools = {n for n in names if n.startswith("mcquest_shell_")}
-    assert len(shell_tools) == 6  # P2 (4) + P4 (2)
+    assert len(shell_tools) == 10  # P2 (4) + P4 (2) + P5 (4)
 
 
 def test_p3_modules_have_no_process_network_or_clock_imports() -> None:
@@ -132,7 +129,9 @@ def test_p3_modules_do_not_import_planner_validator_or_registration_layers() -> 
                 assert (node.module or "").split(".")[-1] not in forbidden_roots, path.name
 
 
-def test_p3_source_contains_no_future_tool_registration_names() -> None:
+def test_p3_source_contains_no_later_phase_tool_registration_names() -> None:
+    # Still valid after P5: the frozen P3 analyzers must not name the tools that
+    # later phases (P4 and P5) registered, so P3 never leaks forward.
     for path in _p3_sources():
         text = path.read_text(encoding="utf-8")
-        assert not any(tool in text for tool in FUTURE_TOOLS), path.name
+        assert not any(tool in text for tool in P4_TOOLS | P5_TOOLS), path.name

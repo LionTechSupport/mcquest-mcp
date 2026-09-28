@@ -360,39 +360,40 @@ _CAPABILITIES_V09: tuple[Capability, ...] = (
         family=_SHELL, phase="P4", status=_IMPL, execution=_NP,
         scope="command", intent_tags=("COMMAND_VALIDATE",),
     ),
-)
-
-# --- PLANNED capabilities (P4/P5) — NOT registered, NOT implemented ---------
-# These rows exist only so the approved roadmap is machine-readable. They are
-# excluded from every drift test's equality set and must never be presented as
-# implemented or executable (authorization §13).
-
-PLANNED_CAPABILITIES: tuple[Capability, ...] = (
-    _row(
-        "mcquest_shell_history",
-        "Page command/observation history with n0-n3 duplicate context",
-        family=_SHELL, phase="P5", status=_PLAN, execution=_NP,
-        scope="command", intent_tags=("HISTORY_READ",),
-    ),
-    _row(
-        "mcquest_shell_next",
-        "Differentiated next action after a failure (never a blind retry)",
-        family=_SHELL, phase="P5", status=_PLAN, execution=_NP,
-        scope="command", intent_tags=("NEXT_ACTION",),
-    ),
+    # --- P5 (decision A11, phase 3 of 3): planner, preparation, history, next ---
     _row(
         "mcquest_shell_plan",
-        "Classify intent, build a minimal plan, route to existing capabilities",
-        family=_SHELL, phase="P5", status=_PLAN, execution=_NP,
+        "Classify intent, build a bounded plan, route to existing capabilities",
+        family=_SHELL, phase="P5", status=_IMPL, execution=_NP,
         scope="command", intent_tags=("COMMAND_PLAN",),
     ),
     _row(
         "mcquest_shell_prepare",
         "Emit prepared command text, always labeled not executed",
-        family=_SHELL, phase="P5", status=_PLAN, execution=_NP,
+        family=_SHELL, phase="P5", status=_IMPL, execution=_NP,
         scope="command", intent_tags=("COMMAND_PREPARE",),
     ),
+    _row(
+        "mcquest_shell_history",
+        "Page command/observation history with n0-n3 duplicate context",
+        family=_SHELL, phase="P5", status=_IMPL, execution=_NP,
+        scope="command", intent_tags=("HISTORY_READ",),
+    ),
+    _row(
+        "mcquest_shell_next",
+        "Differentiated next action after a failure (never a blind retry)",
+        family=_SHELL, phase="P5", status=_IMPL, execution=_NP,
+        scope="command", intent_tags=("NEXT_ACTION",),
+    ),
 )
+
+# --- PLANNED capabilities (P6+) — NOT registered, NOT implemented -------------
+# P4 and P5 both moved their rows into IMPLEMENTED at their own phase gate, so
+# the approved ten-tool surface is now fully registered and this tuple is empty.
+# It is retained deliberately: the invariant "PLANNED is disjoint from LIVE and
+# never advertised as implemented" (A12) must remain testable, and a future
+# phase must add its rows here rather than inventing a second registry.
+PLANNED_CAPABILITIES: tuple[Capability, ...] = ()
 
 # The implemented registry: 24 V0.8 + 4 V0.9 (P2), sorted by name so order is
 # deterministic and matches the EXPECTED_TOOLS ordering (A12 test 3).
@@ -457,7 +458,7 @@ def _heading(group: str) -> str:
         return f"IMPLEMENTED - V0.8 REPOSITORY INTELLIGENCE ({total} registered; read-only)"
     if group == "v09":
         total = sum(1 for row in CAPABILITIES if row.family is _SHELL)
-        return f"IMPLEMENTED - V0.9 SHELL INTELLIGENCE (P2+P4: {total} registered; read-only)"
+        return f"IMPLEMENTED - V0.9 SHELL INTELLIGENCE (P2+P4+P5: {total} registered; read-only)"
     return (
         "PLANNED - NOT REGISTERED / NOT IMPLEMENTED / NOT EXECUTABLE "
         f"({len(PLANNED_CAPABILITIES)})"

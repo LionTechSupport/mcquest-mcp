@@ -20,7 +20,7 @@ from ..config import NORMAL_OUTPUT_CHARS
 from ..formatting import summary_block, truncate
 from ..shell import environment
 from ..shell import capabilities as registry
-from ..shell import observe, validate
+from ..shell import observe, planner, validate
 from ..shell.facts import VALUE_UNKNOWN, Fact, Scope, Source
 from ..shell.redundancy import ChangeReason
 from ..shell.terminal import TerminalIdentity
@@ -340,6 +340,257 @@ def shell_capabilities(offset: int = 0, max_results: int = 10) -> str:
         body.append("")
     text = (
         summary_block("mcquest_shell_capabilities", fields)
+        + "\n\n"
+        + "\n".join(body)
+        + "\n[END]"
+    )
+    return truncate(text, limit=NORMAL_OUTPUT_CHARS)
+
+
+# --- P5 adapters: plan / prepare / history / next ---------------------------
+# These are thin like every other adapter in this module: normalize declared
+# inputs, call the P5 planner, render through the shared formatting layer. They
+# execute nothing and mutate nothing; `planner.EXECUTION_NOT_PERMITTED` is
+# rendered in every plan so a recommendation can never read as authorization.
+
+
+def _evidence_line(item: planner.EvidenceItem) -> str:
+    return (
+        f"- {item.observation}: {item.state.value} | {item.source.value}/"
+        f"{item.trust.value} | {item.scope.value}/{item.freshness.value} | "
+        f"ev: {item.detail}"
+    )
+
+
+def _step_line(step: planner.PlanStep) -> str:
+    capability = f" -> {step.capability}" if step.capability else ""
+    return (
+        f"{step.order}. [{step.ladder.value}]{capability} {step.action} "
+        f"(operation {step.operation.value})"
+    )
+
+
+def _plan_sections(plan: planner.Plan) -> list[str]:
+    body: list[str] = []
+    body.append(f"operation: {plan.operation.value}")
+    body.append(f"status: {plan.status.value}")
+    body.append("")
+    body.append("evidence:")
+    if plan.evidence:
+        for item in plan.evidence:
+            body.append(_evidence_line(item))
+    else:
+        body.append("  - no required evidence for this operation class")
+    body.append("")
+    body.append("required observations:")
+    if plan.required_observations:
+        for requirement in plan.required_observations:
+            body.append(
+                f"- {requirement.observation} ({requirement.scope.value}) via "
+                f"{requirement.capability}: {requirement.reason}"
+            )
+    else:
+        body.append("  - none")
+    body.append("")
+    body.append("plan (recommendation, not execution):")
+    if plan.steps:
+        for step in plan.steps:
+            body.append(_step_line(step))
+    else:
+        body.append("  - no step is justified for this intent")
+    body.append("")
+    body.append("blockers:")
+    for blocker in plan.blockers:
+        body.append(f"- {blocker}")
+    if not plan.blockers:
+        body.append("  - none")
+    body.append("")
+    body.append("validation requirements:")
+    for note in plan.validation_context:
+        body.append(f"- {note}")
+    body.append("")
+    body.append(f"note: {planner.EXECUTION_NOT_PERMITTED}")
+    return body
+
+
+def shell_plan(
+    intent: str,
+    client_session: str = "",
+    client_process_id: str = "",
+) -> str:
+    """Classify an intent and emit a bounded, deterministic plan (never executed)."""
+    store = environment.get_store()
+    plan = planner.build_plan(
+        intent, store,
+        terminal_session=client_session or None,
+        process_id=client_process_id or None,
+    )
+    known = sum(
+        1 for item in plan.evidence if item.state is planner.EvidenceState.KNOWN
+    )
+    fields: dict[str, object] = {
+        "operation": plan.operation.value,
+        "status": plan.status.value,
+        "steps": len(plan.steps),
+        "known_evidence": known,
+        "required_observations": len(plan.required_observations),
+        "blockers": len(plan.blockers),
+        "execution_permitted": "false",
+        "read_only": "true",
+    }
+    text = (
+        summary_block("mcquest_shell_plan", fields)
+        + "\n\n"
+        + "\n".join(_plan_sections(plan))
+        + "\n[END]"
+    )
+    return truncate(text, limit=NORMAL_OUTPUT_CHARS)
+
+
+def _compact_plan(plan: planner.Plan) -> list[str]:
+    """A short plan digest for the next/prepare adapters.
+
+    ``shell_plan`` renders the full ladder; ``prepare`` and ``next`` report one
+    decision and must not re-dump every step, so they render this bounded digest
+    instead of the whole plan (contract §16 output bounds).
+    """
+    body = [
+        f"operation: {plan.operation.value}",
+        f"status: {plan.status.value}",
+    ]
+    if plan.evidence:
+        summary = ", ".join(
+            f"{item.observation}={item.state.value}" for item in plan.evidence
+        )
+        body.append(f"evidence: {summary}")
+    if plan.required_observations:
+        body.append(
+            "missing: "
+            + ", ".join(
+                f"{item.observation} ({item.scope.value})"
+                for item in plan.required_observations
+            )
+        )
+    for blocker in plan.blockers:
+        body.append(f"blocker: {blocker}")
+    body.append(f"note: {planner.EXECUTION_NOT_PERMITTED}")
+    return body
+
+
+def shell_prepare(
+    intent: str,
+    client_session: str = "",
+    client_process_id: str = "",
+) -> str:
+    """Prepare a requested task as text only; never execute, write, or install."""
+    store = environment.get_store()
+    preparation = planner.prepare_request(
+        intent, store,
+        terminal_session=client_session or None,
+        process_id=client_process_id or None,
+    )
+    body = [preparation.prepared_text, ""]
+    body.extend(_compact_plan(preparation.plan))
+    fields: dict[str, object] = {
+        "operation": preparation.operation.value,
+        "status": preparation.status.value,
+        "missing_prerequisites": len(preparation.missing_prerequisites),
+        "executed": "false",
+        "execution_permitted": "false",
+        "read_only": "true",
+    }
+    text = (
+        summary_block("mcquest_shell_prepare", fields)
+        + "\n\n"
+        + "\n".join(body)
+        + "\n[END]"
+    )
+    return truncate(text, limit=NORMAL_OUTPUT_CHARS)
+
+
+def shell_history(
+    offset: int = 0,
+    limit: int = 10,
+    client_session: str = "",
+    client_process_id: str = "",
+) -> str:
+    """Page the existing in-memory command/observation history deterministically."""
+    store = environment.get_store()
+    view = planner.history_view(
+        store,
+        offset=offset,
+        limit=limit,
+        terminal_session=client_session or None,
+        process_id=client_process_id or None,
+    )
+    fields: dict[str, object] = {
+        "status": view.status.value,
+        "total": view.total,
+        "returned": view.returned,
+        "offset": view.offset,
+        "has_more": "true" if view.has_more else "false",
+        "persistence": "in-memory only",
+        "read_only": "true",
+    }
+    if view.has_more:
+        fields["next_offset"] = view.next_offset
+    body: list[str] = []
+    for row in view.rows:
+        body.append(
+            f"- {row.record_id} [{row.kind}] {row.state.value} | "
+            f"{row.source}/{row.trust} | {row.scope}/{row.freshness} | "
+            f"binding={row.binding} | ev: {row.detail}"
+        )
+    if not view.rows:
+        body.append("  - no history record available in this server process")
+    for note in view.notes:
+        body.append(f"note: {note}")
+    body.append(f"note: {planner.EXECUTION_NOT_PERMITTED}")
+    text = (
+        summary_block("mcquest_shell_history", fields)
+        + "\n\n"
+        + "\n".join(body)
+        + "\n[END]"
+    )
+    return truncate(text, limit=NORMAL_OUTPUT_CHARS)
+
+
+def shell_next(
+    intent: str,
+    last_command: str = "",
+    changed_reasons: str = "",
+    repository_root: str = "",
+    client_session: str = "",
+    client_process_id: str = "",
+) -> str:
+    """Recommend the next useful observation/planning step; never execute it."""
+    store = environment.get_store()
+    reasons = tuple(
+        ChangeReason(item.strip())
+        for item in changed_reasons.split(",")
+        if item.strip()
+    )
+    step = planner.next_step(
+        intent, store,
+        terminal_session=client_session or None,
+        process_id=client_process_id or None,
+        changed_reasons=reasons,
+        last_command=last_command,
+        repository_root=repository_root or None,
+    )
+    fields: dict[str, object] = {
+        "action": step.action.value,
+        "operation": step.operation.value,
+        "changed_conditions": len(step.changed_conditions),
+        "executed": "false",
+        "execution_permitted": "false",
+        "read_only": "true",
+    }
+    body = [f"action: {step.action.value}", f"detail: {step.detail}", ""]
+    body.extend(_compact_plan(step.plan))
+    body.append(f"method: {step.method_line}")
+    text = (
+        summary_block("mcquest_shell_next", fields)
         + "\n\n"
         + "\n".join(body)
         + "\n[END]"

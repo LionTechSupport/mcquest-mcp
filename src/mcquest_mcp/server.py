@@ -35,7 +35,11 @@ from .tools.shell_env import (
     shell_capabilities,
     shell_context,
     shell_environment,
+    shell_history,
+    shell_next,
     shell_observe,
+    shell_plan,
+    shell_prepare,
     shell_terminal,
     shell_validate,
 )
@@ -639,6 +643,70 @@ def mcquest_shell_observe(
         recorded_at_source=recorded_at_source,
         operation=operation,
         invalidate_event=invalidate_event,
+        client_session=client_session,
+        client_process_id=client_process_id,
+    )
+
+
+@mcp.tool()
+def mcquest_shell_plan(
+    intent: Annotated[str, Field(description="The requested task or intent to classify, e.g. 'read the file README.md' or 'check git status'. Classified into the frozen contract §13 operation vocabulary; an unclassifiable intent stays UNKNOWN.")],
+    client_session: Annotated[str, Field(description="Optional client-declared terminal session id, used to bind SESSION/PROCESS evidence to the correct terminal. Undeclared identity leaves those observations UNKNOWN.")] = "",
+    client_process_id: Annotated[str, Field(description="Optional client-declared terminal process id, used with client_session for PROCESS-scoped evidence. Undeclared identity leaves those observations UNKNOWN.")] = "",
+) -> str:
+    """READ ONLY. Classify an intent into the frozen operation vocabulary and return a bounded, deterministic plan: current evidence state (known/unknown/stale/invalidated/insufficient), relevant known facts, required observations, proposed steps on the contract §13 preference ladder (existing evidence, then an existing MCQuest capability, then a structured tool operation, then a targeted shell operation, and a broad scan only as a last resort), rationale and evidence basis, validation requirements, and blockers. A plan is a recommendation, never execution authorization: the server never executes the recommended operation, never mutates any state, and a routed capability is named as a recommendation rather than invoked. No numeric confidence, no numeric risk, and no wall-clock TTL; unknown information stays unknown."""
+    return shell_plan(
+        intent=intent,
+        client_session=client_session,
+        client_process_id=client_process_id,
+    )
+
+
+@mcp.tool()
+def mcquest_shell_prepare(
+    intent: Annotated[str, Field(description="The task to prepare, normalized and classified into the frozen operation vocabulary. When it cannot be safely or sufficiently prepared, a deterministic blocked/insufficient result is returned instead of a guess.")],
+    client_session: Annotated[str, Field(description="Optional client-declared terminal session id, used to resolve already-known facts for the correct terminal.")] = "",
+    client_process_id: Annotated[str, Field(description="Optional client-declared terminal process id, used with client_session to resolve process-scoped facts.")] = "",
+) -> str:
+    """READ ONLY. Prepare a requested task without executing it: normalize and classify the request, resolve already-known facts from the existing in-memory store, identify missing prerequisites and required observations, and emit the preparation as text explicitly labeled PREPARED / NOT EXECUTED. Preparation never executes a command, writes files, installs packages, modifies git or environment state, spawns processes, or invokes arbitrary shell commands. An insufficient or unsafe request returns a deterministic blocked result rather than a guess, and no numeric confidence, numeric risk, or wall-clock TTL is produced."""
+    return shell_prepare(
+        intent=intent,
+        client_session=client_session,
+        client_process_id=client_process_id,
+    )
+
+
+@mcp.tool()
+def mcquest_shell_history(
+    offset: Annotated[int, Field(description="Zero-based index of the first history record to return on this page. Paging is deterministic and never re-sorts.")] = 0,
+    limit: Annotated[int, Field(description="Maximum number of history records to return on this page. Defaults to 10 (maximum 50).")] = 10,
+    client_session: Annotated[str, Field(description="Optional client-declared terminal session id; when supplied, only records for that terminal are returned and facts are never promoted across sessions.")] = "",
+    client_process_id: Annotated[str, Field(description="Optional client-declared terminal process id; when supplied, only records for that process are returned.")] = "",
+) -> str:
+    """READ ONLY. Page the command and observation history held by the single existing in-memory ObservationStore/CommandHistory, with no second persistence system and no wall-clock TTL. Every row carries its established scope, freshness, source, trust, identity binding, and the store's own invalidation decision (known, stale, or invalidated). When history is unavailable or empty it is reported explicitly as insufficient/unknown rather than filled in, and nothing is persisted to disk."""
+    return shell_history(
+        offset=offset,
+        limit=limit,
+        client_session=client_session,
+        client_process_id=client_process_id,
+    )
+
+
+@mcp.tool()
+def mcquest_shell_next(
+    intent: Annotated[str, Field(description="The task whose next useful step is being determined; classified into the frozen operation vocabulary.")],
+    last_command: Annotated[str, Field(description="Optional the last command text considered, used only for n0-n3 duplicate detection. Supplying it enables blind-retry prevention: an unchanged repeat is refused and a different next action is returned.")] = "",
+    changed_reasons: Annotated[str, Field(description="Optional comma-separated changed conditions that would justify a repeat, e.g. file, worktree, terminal, process, cwd, configuration, prior_staleness, prior_failure, scope. Without one, a duplicate is never repeated.")] = "",
+    repository_root: Annotated[str, Field(description="Optional known/declared repository root; when supplied, the n3 root-prefix normalization level is evaluated, otherwise redundancy is reported as partial.")] = "",
+    client_session: Annotated[str, Field(description="Optional client-declared terminal session id, used to bind evidence and history to the correct terminal.")] = "",
+    client_process_id: Annotated[str, Field(description="Optional client-declared terminal process id, used with client_session for process-scoped evidence.")] = "",
+) -> str:
+    """READ ONLY. Determine the next useful observation or planning step for an intent, accounting for existing facts, freshness, invalidation, provenance, trust, scope, prerequisites, validation findings, and missing evidence. Blind-retry prevention follows the contract: a repeat is justified only when a relevant condition changed, otherwise the next action must differ from the previous one. This is a single deterministic bounded recommendation - never an execution, never an autonomous agent loop, and it never repairs anything."""
+    return shell_next(
+        intent=intent,
+        last_command=last_command,
+        changed_reasons=changed_reasons,
+        repository_root=repository_root,
         client_session=client_session,
         client_process_id=client_process_id,
     )
