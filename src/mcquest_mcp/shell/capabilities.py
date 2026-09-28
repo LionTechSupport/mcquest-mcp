@@ -342,11 +342,23 @@ _CAPABILITIES_V09: tuple[Capability, ...] = (
         prerequisites=_ROOT_REQUIRED,
     ),
     _row(
+        "mcquest_shell_observe",
+        "Record declared observations/evidence and invalidate affected scopes",
+        family=_SHELL, phase="P4", status=_IMPL, execution=_NP,
+        scope="context", intent_tags=("OBSERVATION_INGEST",),
+    ),
+    _row(
         "mcquest_shell_terminal",
         "Terminal/session/process identity: server (mcp_server) vs client, "
         "unknown when undeclared",
         family=_SHELL, phase="P2", status=_IMPL, execution=_NP,
         scope="terminal", intent_tags=("TERMINAL_READ",),
+    ),
+    _row(
+        "mcquest_shell_validate",
+        "Full deterministic command validation report (incl. lint mode)",
+        family=_SHELL, phase="P4", status=_IMPL, execution=_NP,
+        scope="command", intent_tags=("COMMAND_VALIDATE",),
     ),
 )
 
@@ -369,12 +381,6 @@ PLANNED_CAPABILITIES: tuple[Capability, ...] = (
         scope="command", intent_tags=("NEXT_ACTION",),
     ),
     _row(
-        "mcquest_shell_observe",
-        "Record declared observations/evidence and invalidate affected scopes",
-        family=_SHELL, phase="P4", status=_PLAN, execution=_NP,
-        scope="context", intent_tags=("OBSERVATION_INGEST",),
-    ),
-    _row(
         "mcquest_shell_plan",
         "Classify intent, build a minimal plan, route to existing capabilities",
         family=_SHELL, phase="P5", status=_PLAN, execution=_NP,
@@ -385,12 +391,6 @@ PLANNED_CAPABILITIES: tuple[Capability, ...] = (
         "Emit prepared command text, always labeled not executed",
         family=_SHELL, phase="P5", status=_PLAN, execution=_NP,
         scope="command", intent_tags=("COMMAND_PREPARE",),
-    ),
-    _row(
-        "mcquest_shell_validate",
-        "Full deterministic command validation report (incl. lint mode)",
-        family=_SHELL, phase="P4", status=_PLAN, execution=_NP,
-        scope="command", intent_tags=("COMMAND_VALIDATE",),
     ),
 )
 
@@ -457,7 +457,7 @@ def _heading(group: str) -> str:
         return f"IMPLEMENTED - V0.8 REPOSITORY INTELLIGENCE ({total} registered; read-only)"
     if group == "v09":
         total = sum(1 for row in CAPABILITIES if row.family is _SHELL)
-        return f"IMPLEMENTED - V0.9 SHELL INTELLIGENCE (P2: {total} registered; read-only)"
+        return f"IMPLEMENTED - V0.9 SHELL INTELLIGENCE (P2+P4: {total} registered; read-only)"
     return (
         "PLANNED - NOT REGISTERED / NOT IMPLEMENTED / NOT EXECUTABLE "
         f"({len(PLANNED_CAPABILITIES)})"

@@ -35,7 +35,9 @@ from .tools.shell_env import (
     shell_capabilities,
     shell_context,
     shell_environment,
+    shell_observe,
     shell_terminal,
+    shell_validate,
 )
 
 
@@ -583,6 +585,63 @@ def mcquest_shell_capabilities(
     """READ ONLY. Expose the V0.9 capability registry with intent metadata (decision A12): every implemented tool with purpose, family (V0.8 repository intelligence vs V0.9 shell intelligence), phase, read-only status, execution class, operation classes, and prerequisites, followed by clearly labeled PLANNED rows that are not registered and not executable. The pinned EXPECTED_TOOLS list remains the registration authority; this registry never registers anything. Returns summary-first deterministic output, paged."""
     return shell_capabilities(offset=offset, max_results=max_results)
 
+
+# --- V0.9 P4 validation / observation tools (decision A11: 28 -> 30) --------
+
+@mcp.tool()
+def mcquest_shell_validate(
+    command: Annotated[str, Field(description="The proposed command text to analyze. It is never executed by V0.9.")],
+    mode: Annotated[str, Field(description="Analysis mode: 'validate' (default) or 'lint'. Lint is a MODE of this tool, never a separate tool (decision A11).")] = "validate",
+    client_cwd: Annotated[str, Field(description="Optional client-declared terminal working directory (CLIENT_DECLARED; not verified). Empty string = not declared.")] = "",
+    client_shell: Annotated[str, Field(description="Optional client-declared terminal shell family, e.g. 'PowerShell' (CLIENT_DECLARED; not verified). Empty string = not declared.")] = "",
+    client_shell_version: Annotated[str, Field(description="Optional client-declared terminal shell version (CLIENT_DECLARED; not verified). Empty string = not declared.")] = "",
+    client_session: Annotated[str, Field(description="Optional client-declared terminal session id (CLIENT_DECLARED; not verified). Empty string = not declared.")] = "",
+    client_process_id: Annotated[str, Field(description="Optional client-declared terminal process id (CLIENT_DECLARED; not verified). Empty string = not declared.")] = "",
+    repository_root: Annotated[str, Field(description="Optional known/declared repository root used for redundancy n3 root-prefix comparison. Empty string = not evaluated.")] = "",
+    changed_reasons: Annotated[str, Field(description="Optional comma-separated documented change reasons (file, worktree, terminal, process, cwd, configuration, prior_staleness, prior_failure, scope) that would justify a repeat. Empty string = none.")] = "",
+) -> str:
+    """READ ONLY. Compose every V0.9 analyzer into one deterministic validation report with a leading machine-readable [SUMMARY] block and the contract's fixed section order (Syntax, Parse completeness, Shell dialect, Native boundary, CWD, Path safety, Redundancy, Operation, Mutation, Encoding, Failure propagation, Stale-variable hazard, Cost, Capability duplication, Recommendation). Verdict tokens are exactly ERROR/WARNING/INFO/PASS with a 'verdict: <ERROR|WARNINGS|PASS>' summary line. Destructive commands are reported from P4's own lexical evidence and are never cleared by a non-mutation-bearing operation classification; UNKNOWN is preserved, no numeric confidence or risk score is produced, output is byte-identical across repeated calls, and the proposed command is analyzed only - never executed, never repaired, and never selected by this tool."""
+    return shell_validate(
+        command=command,
+        mode=mode,
+        client_cwd=client_cwd,
+        client_shell=client_shell,
+        client_shell_version=client_shell_version,
+        client_session=client_session,
+        client_process_id=client_process_id,
+        repository_root=repository_root,
+        changed_reasons=changed_reasons,
+    )
+
+
+@mcp.tool()
+def mcquest_shell_observe(
+    kind: Annotated[str, Field(description="A14 ingest kind: 'observation' (default) or 'command'.")] = "observation",
+    name: Annotated[str, Field(description="A14 'name' - namespaced observation, e.g. mcquest_search.total or locale.quiz.loading.si. Required when kind=observation.")] = "",
+    value: Annotated[str, Field(description="A14 'value' - the observed value as text. For kind=command this is the command text.")] = "",
+    scope: Annotated[str, Field(description="A14 'scope': REPOSITORY | WORKTREE | FILE | SESSION | PROCESS | EPHEMERAL. Required when kind=observation.")] = "",
+    subject: Annotated[str, Field(description="Optional A14 'subject' - path, capability, or query the observation concerns. Also narrows refined invalidation targets.")] = "",
+    source: Annotated[str, Field(description="A14 'source' - the tool or command that produced the evidence; kept as the originating source (contract §17).")] = "",
+    recorded_at_source: Annotated[str, Field(description="A14 'recorded_at_source': SERVER (tool-derived, SERVER_OBSERVED) or CLIENT (declared, untrusted). Immutable provenance.")] = "CLIENT",
+    operation: Annotated[str, Field(description="Optional operation label retained with the observation/command record.")] = "",
+    invalidate_event: Annotated[str, Field(description="Optional P1 invalidation event to apply instead of recording, e.g. file_modified, git_checkout, set_location, branch_switch, server_restart. Only its mapped scopes/subjects are invalidated.")] = "",
+    client_session: Annotated[str, Field(description="Optional client-declared terminal session id. Required to record SESSION scope; required with client_process_id for PROCESS/EPHEMERAL scope.")] = "",
+    client_process_id: Annotated[str, Field(description="Optional client-declared terminal process id. Required with client_session for PROCESS/EPHEMERAL scope.")] = "",
+) -> str:
+    """READ ONLY. Record declared observations, ingested tool evidence, and command history through the explicit A14 ingest shape, and apply P1 invalidation to exactly the mapped scopes. Declared evidence keeps the phrase 'declared by client; not verified' for its lifetime; tool-derived evidence is labeled SERVER_OBSERVED and keeps its originating tool as the source; SESSION/PROCESS/EPHEMERAL ingestion is rejected without a declared client identity so no fact is ever promoted across terminals. Freshness is semantic with no wall-clock TTL; the store is in-memory only and nothing is persisted, no command is executed, and no state outside the server process is changed."""
+    return shell_observe(
+        kind=kind,
+        name=name,
+        value=value,
+        scope=scope,
+        subject=subject,
+        source=source,
+        recorded_at_source=recorded_at_source,
+        operation=operation,
+        invalidate_event=invalidate_event,
+        client_session=client_session,
+        client_process_id=client_process_id,
+    )
 
 def main() -> None:
     """

@@ -29,9 +29,12 @@ P2_TOOLS = (
 PLANNED_TOOLS = (
     "mcquest_shell_history",
     "mcquest_shell_next",
-    "mcquest_shell_observe",
     "mcquest_shell_plan",
     "mcquest_shell_prepare",
+)
+
+P4_TOOLS = (
+    "mcquest_shell_observe",
     "mcquest_shell_validate",
 )
 
@@ -53,10 +56,11 @@ def test_registry_equals_live_server_listing() -> None:
 
 
 def test_registry_totals_match_the_phase_plan() -> None:
+    # A11 phased registration: 24 -> 28 (P2) -> 30 (P4) -> 34 (P5).
     implemented, planned = registry.capability_totals()
-    assert (implemented, planned) == (28, 6)
-    assert len(registry.CAPABILITIES) == 28
-    assert len(registry.PLANNED_CAPABILITIES) == 6
+    assert (implemented, planned) == (30, 4)
+    assert len(registry.CAPABILITIES) == 30
+    assert len(registry.PLANNED_CAPABILITIES) == 4
 
 
 def test_registry_order_is_deterministic_and_sorted() -> None:
@@ -78,8 +82,8 @@ def test_families_distinguish_v08_and_v09_capabilities() -> None:
         if row.family is registry.CapabilityFamily.SHELL_INTELLIGENCE
     ]
     assert len(repo_rows) == 24
-    assert len(shell_rows) == 4
-    assert set(row.name for row in shell_rows) == set(P2_TOOLS)
+    assert len(shell_rows) == 6
+    assert set(row.name for row in shell_rows) == set(P2_TOOLS) | set(P4_TOOLS)
 
 
 def test_the_four_p2_tools_are_implemented_shell_capabilities() -> None:
@@ -157,8 +161,8 @@ def test_planned_capabilities_are_never_registered_or_advertised() -> None:
 
 def test_planned_rows_are_marked_planned_with_their_phase() -> None:
     by_name = {row.name: row for row in registry.PLANNED_CAPABILITIES}
-    assert by_name["mcquest_shell_validate"].phase == "P4"
-    assert by_name["mcquest_shell_observe"].phase == "P4"
+    # Only P5 tools remain planned: validate/observe moved to IMPLEMENTED at P4.
+    assert all(by_name[name].phase == "P5" for name in PLANNED_TOOLS)
     for name in PLANNED_TOOLS:
         assert by_name[name].status is registry.CapabilityStatus.PLANNED
         assert by_name[name].read_only is True
@@ -201,6 +205,24 @@ def test_paging_reaches_every_row_exactly_once() -> None:
     assert len(set(seen)) == 34
 
 
+def test_the_two_p4_tools_are_implemented_shell_capabilities() -> None:
+    """A11: P4 registers validate + observe, and nothing beyond them."""
+    by_name = {row.name: row for row in registry.CAPABILITIES}
+    for name in P4_TOOLS:
+        row = by_name[name]
+        assert row.status is registry.CapabilityStatus.IMPLEMENTED
+        assert row.phase == "P4"
+        assert row.read_only is True
+        assert row.purpose.strip()
+        assert row.execution in registry.EXECUTION_VOCABULARY
+        # A13: neither P4 tool may ever run a client command.
+        assert row.execution == registry.EXECUTION_NONE
+        assert row.mutation_cost is None
+    # No P5 tool may be registered before its own authorization.
+    for name in PLANNED_TOOLS:
+        assert name not in by_name
+
+
 def test_paging_rejects_invalid_arguments() -> None:
     with pytest.raises(ValueError):
         registry.capability_page(offset=-1)
@@ -222,7 +244,7 @@ def test_rendered_sections_label_implemented_and_planned_distinctly() -> None:
                 assert "status=IMPLEMENTED" in line
                 assert "status=PLANNED" not in line
 
-    planned_page = registry.capability_page(offset=28, max_results=10)
+    planned_page = registry.capability_page(offset=30, max_results=10)
     headings = [heading for heading, _lines in planned_page.sections]
     assert headings and all("PLANNED" in heading for heading in headings)
     assert "NOT EXECUTABLE" in headings[0]

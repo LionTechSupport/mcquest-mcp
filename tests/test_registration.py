@@ -14,6 +14,12 @@ expected count is reached with the last approved V0.8 tool).
 V0.9 P2 (decision A11, phase 1 of 3): ``mcquest_shell_environment``,
 ``mcquest_shell_terminal``, ``mcquest_shell_context``, and
 ``mcquest_shell_capabilities`` are registered (24 -> 28).
+
+V0.9 P4 (decision A11, phase 2 of 3): ``mcquest_shell_validate`` (full
+deterministic validation report, including the ``lint`` mode) and
+``mcquest_shell_observe`` (A14 observation ingestion and invalidation) are
+registered (28 -> 30). ``shell_lint`` stays a mode of ``mcquest_shell_validate``;
+no separate lint tool exists.
 ``EXPECTED_TOOLS`` remains the single registration authority (decision A12);
 the ``shell/capabilities.py`` registry is metadata only and is drift-tested
 against this list in both directions.
@@ -53,16 +59,18 @@ EXPECTED_TOOLS = [
     "mcquest_shell_capabilities",
     "mcquest_shell_context",
     "mcquest_shell_environment",
+    "mcquest_shell_observe",
     "mcquest_shell_terminal",
+    "mcquest_shell_validate",
     "mcquest_ui_contract_audit",
 ]
 
 
-def test_exactly_28_tools_remain_registered() -> None:
+def test_exactly_30_tools_remain_registered() -> None:
     tools = asyncio.run(mcp.list_tools())
     names = sorted(tool.name for tool in tools)
     assert names == EXPECTED_TOOLS
-    assert len(names) == 28
+    assert len(names) == 30
 
 
 def test_mcquest_read_file_parameter_descriptions_and_semantics() -> None:
