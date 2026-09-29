@@ -54,7 +54,34 @@ mcp = MCPServer(
         "read-only: never modify, create, delete, rename, or execute project "
         "files. When an MCP tool provides the required repository evidence, "
         "prefer it over an equivalent shell command (e.g. grep, rg, "
-        "Select-String, Get-ChildItem). Use mcquest_search_docs for "
+        "Select-String, Get-ChildItem). "
+        "ROUTING BY TARGET LOCATION - decide this before choosing a tool. "
+        "IN-ROOT: if the requested file or directory is inside the selected "
+        "project root, the MCQuest repository tools below are an applicable "
+        "branch; prefer bounded, deterministic MCQuest structured evidence "
+        "whenever one of their scopes matches the request. OUT-OF-ROOT: if the "
+        "requested path lies outside the selected project root, MCQuest "
+        "repository tools are NOT the applicable branch - they reject such "
+        "paths by design with 'Path escapes MCQuest project root'. Never "
+        "bypass, weaken, or work around that project-root confinement, and "
+        "never re-request an out-of-root path as if it were in-root. For "
+        "local files outside the root, use the host/client's own native file "
+        "tools when available (e.g. read_files, search_codebase). Being "
+        "out-of-root does NOT imply shell: when a native file tool can read the "
+        "target, a shell pipeline (Get-Content, Select-String, findstr, cat, "
+        "grep) is unnecessary. Shell and process tooling (mcquest_shell_*) plus "
+        "client terminal execution remain the correct branch for environment, "
+        "process and terminal state, and for genuine command execution that no "
+        "structured read-only tool provides. "
+        "SEARCH SCOPE is per-tool and narrower than 'the repository': "
+        "mcquest_search and mcquest_search_docs walk only inside the selected "
+        "project root, prune generated/dependency directories such as .git, "
+        "node_modules, .venv, __pycache__, .pytest_cache, dist, build, coverage, "
+        ".next and .turbo, skip binary/large files, and order results "
+        "deterministically by (relative_path, line). Their default path is "
+        "layout-specific ('frontend/src' and 'docs' respectively), so set path "
+        "explicitly when the selected project uses a different layout. "
+        "Use mcquest_search_docs for "
         "Markdown/documentation searches, mcquest_search for source-code regex "
         "searches, mcquest_find_files to locate files by name, "
         "mcquest_read_file / mcquest_read_doc to read known files, and "
@@ -187,7 +214,7 @@ def mcquest_search(
     offset: Annotated[int, Field(description="Zero-based index of the first match to return on this page. Use the previous page's next_offset to continue. Defaults to 0. Page 2 is never returned automatically.")] = 0,
     exclude_pattern: Annotated[str, Field(description="Optional regular expression applied per line to drop matching lines from results (exclude wins on overlap with pattern; honors case_sensitive; applied to both the count and the page). Supports regex alternation, e.g. 'foo|bar'. Defaults to '' (no exclusion).")] = "",
 ) -> str:
-    """READ ONLY. Search source files in the selected project using a regular expression. Returns a summary (total, files_affected, returned, next_offset, has_more, truncated) followed by matching lines with limited surrounding context, paged deterministically by (path, line). Optionally pass exclude_pattern to filter matching lines out of the results. Use for source-code pattern searches; use mcquest_search_docs for Markdown/documentation searches."""
+    """READ ONLY. Search source files in the selected project using a regular expression. Returns a summary (total, files_affected, returned, next_offset, has_more, truncated) followed by matching lines with limited surrounding context, paged deterministically by (path, line). Optionally pass exclude_pattern to filter matching lines out of the results. Use for source-code pattern searches; use mcquest_search_docs for Markdown/documentation searches. SCOPE: in-root only - the walk starts at the project-relative path (default 'frontend/src'; set it explicitly when the selected project uses a different layout) and never leaves the selected project root, so an out-of-root target is an error rather than a wider search. Generated/dependency directories are pruned (.git, .hg, .svn, node_modules, .venv, venv, __pycache__, .pytest_cache, .mypy_cache, .ruff_cache, dist, build, coverage, .next, .turbo) and binary/generated extensions plus files over MAX_FILE_BYTES (2 MB) are skipped, so total counts source files, not every file on disk. Case-insensitive by default (set case_sensitive=true for exact case). The pattern is a regex; a literal string is a valid regex. Ordering is deterministic by (relative_path, line) and pages are explicit (max_results default 50, hard cap 500, offset/next_offset); total is an authoritative full count while the delivered rows are one page, so collection_complete=true does NOT mean every row was delivered. For Markdown use mcquest_search_docs; for targets outside the selected project root use the host/client native file tools."""
     return search_text(
         pattern=pattern,
         path=path,
@@ -433,7 +460,7 @@ def mcquest_search_docs(
     max_results: Annotated[int, Field(description="Maximum number of matches to return on this page. Defaults to 50 (hard cap 500).")] = 50,
     offset: Annotated[int, Field(description="Zero-based index of the first match to return on this page. Use the previous page's next_offset to continue. Defaults to 0. Page 2 is never returned automatically.")] = 0,
 ) -> str:
-    """READ ONLY. PREFERRED TOOL FOR DOCUMENTATION SEARCH. Search Markdown documentation in the selected project using regex or text patterns. Use this instead of shell grep, rg, PowerShell Select-String, or manual Markdown scanning when the required operation is documentation search. Returns a summary (total, files_affected, returned, next_offset, has_more, truncated) followed by matching lines with surrounding context, paged deterministically by (path, line). Supports restricting the search to a directory (path), filtering files by filename glob (file_pattern), regex with alternation (pattern, e.g. 'foo|bar|baz'), line numbers with optional surrounding context (context_lines bounded to 0-5), and case sensitivity (case_sensitive). Use mcquest_search for source-code searches."""
+    """READ ONLY. PREFERRED TOOL FOR DOCUMENTATION SEARCH. Search Markdown documentation in the selected project using regex or text patterns. Use this instead of shell grep, rg, PowerShell Select-String, or manual Markdown scanning when the required operation is documentation search. Returns a summary (total, files_affected, returned, next_offset, has_more, truncated) followed by matching lines with surrounding context, paged deterministically by (path, line). Supports restricting the search to a directory (path), filtering files by filename glob (file_pattern), regex with alternation (pattern, e.g. 'foo|bar|baz'), line numbers with optional surrounding context (context_lines bounded to 0-5), and case sensitivity (case_sensitive). Use mcquest_search for source-code searches. SCOPE: in-root only - the walk starts at the project-relative path (default 'docs'; set it explicitly when documentation lives elsewhere) and never leaves the selected project root, so an out-of-root target is an error rather than a wider search. Only Markdown extensions are scanned (.md, .markdown, .mdown, .mkd), narrowed further by the file_pattern basename glob (default '*.md'); generated/dependency directories are pruned (.git, .hg, .svn, node_modules, .venv, venv, __pycache__, .pytest_cache, .mypy_cache, .ruff_cache, dist, build, coverage, .next, .turbo) and files over MAX_FILE_BYTES (2 MB) are skipped, so total counts Markdown documents only. Case-insensitive by default (set case_sensitive=true for exact case). The pattern is a regex; a literal string is a valid regex. Ordering is deterministic by (relative_path, line) and pages are explicit (max_results default 50, hard cap 500, offset/next_offset); total is an authoritative full count while the delivered rows are one page, so collection_complete=true does NOT mean every row was delivered. For source code use mcquest_search; for targets outside the selected project root use the host/client native file tools."""
     return search_docs(
         pattern=pattern,
         path=path,

@@ -300,6 +300,48 @@ def test_doc_gap_audit_description_is_discoverable_for_stale_doc_references() ->
         assert trigger in desc, f"description missing trigger {trigger!r}"
     assert "MCQuest project" not in desc
 
+
+# --- V1.0 P2: routing contract + search scope discoverability --------------------
+#
+# P1 (Docs/V1.0/10-V1.0-P1-MEASUREMENT-REPORT.md) measured that local-information
+# requests route to shell even though structured evidence exists, and that
+# mcquest_search (9 matches) and the host search_codebase (80 matches) answered
+# the same literal with no client-visible way to tell which scope was used.
+# P2 fixes this with GUIDANCE ONLY: zero new tools, zero behavior changes.
+# These tests pin that guidance so it cannot silently regress.
+
+
+def test_server_instructions_state_in_root_vs_out_of_root_routing_branch() -> None:
+    """Area 1 / Test 1: the in-root vs out-of-root split is explicit."""
+    assert mcp.instructions is not None
+    text = mcp.instructions
+
+    # Both branches are named as routing decisions, not as prose hints.
+    assert "ROUTING BY TARGET LOCATION" in text
+    assert "IN-ROOT:" in text
+    assert "OUT-OF-ROOT:" in text
+
+    # In-root -> MCQuest structured tools are an applicable branch.
+    assert "MCQuest repository tools below are an applicable branch" in text
+    assert "prefer bounded, deterministic MCQuest structured evidence" in text
+
+    # Out-of-root -> MCQuest is explicitly NOT the branch.
+    assert "MCQuest repository tools are NOT the applicable branch" in text
+
+
+def test_server_instructions_forbid_bypassing_project_root_confinement() -> None:
+    """Area 1 / Test 2: confinement must never be worked around."""
+    text = mcp.instructions
+
+    # The actual rejection reason is named, so the client recognises the error.
+    assert "Path escapes MCQuest project root" in text
+    assert "reject such paths by design" in text
+
+    # Prohibited workarounds, stated separately so neither can be dropped alone.
+    assert "Never bypass, weaken, or work around that project-root confinement" in text
+    assert "re-request an out-of-root path as if it were in-root" in text
+
+
 def test_feature_impact_audit_description_is_discoverable_for_change_impact() -> None:
     """Cline should select mcquest_feature_impact_audit for change-impact review."""
     desc = _tool("mcquest_feature_impact_audit").description
@@ -335,3 +377,139 @@ def test_feature_impact_audit_description_is_discoverable_for_change_impact() ->
     ):
         assert trigger in desc, f"description missing trigger {trigger!r}"
     assert "MCQuest project" not in desc
+
+
+def test_server_instructions_route_out_of_root_files_to_native_client_tools() -> None:
+    """Area 1 / Test 3 + R4: out-of-root local files are a native-tool branch.
+
+    P1 R4/R5 recorded: MCQuest correctly rejected an out-of-root path, the
+    native tool read it successfully, and shell was still unnecessary.
+    """
+    text = mcp.instructions
+
+    # Native host/client file tools are named as the out-of-root branch.
+    assert "use the host/client's own native file tools when available" in text
+    assert "read_files" in text
+    assert "search_codebase" in text
+
+    # R4: out-of-root must NOT be equated with shell.
+    assert "Being out-of-root does NOT imply shell" in text
+    assert "a shell pipeline (Get-Content, Select-String, findstr, cat, " in text
+    assert "grep) is unnecessary" in text
+
+    # R5: shell/process stays reserved for environment/process/execution.
+    assert (
+        "mcquest_shell_*) plus client terminal execution remain the correct branch"
+        in text
+    )
+    assert "for environment, " in text
+    assert "genuine command execution that no structured read-only tool provides" in text
+
+
+def test_server_instructions_distinguish_structured_evidence_from_shell() -> None:
+    """Area 1 / Test 4: structured evidence is preferred to shell pipelines."""
+    text = mcp.instructions
+
+    # The pre-existing structured-first rule survives unchanged.
+    assert "When an MCP tool provides the required repository evidence, " in text
+    assert "prefer it over an equivalent shell command" in text
+
+    # The V0.9 frozen shell-acceptable fallback is preserved.
+    assert "Shell remains acceptable" in text
+    assert "outside repository investigation" in text
+
+
+def test_search_scope_semantics_are_discoverable_from_tool_descriptions() -> None:
+    """Area 2 / Test 5: each search surface declares its own scope.
+
+    P1 could not tell which scope a result covered. Both descriptions must now
+    state root, pruning, case, ordering, and paging.
+    """
+    for name, default_path, corpus in (
+        ("mcquest_search", "frontend/src", "source files"),
+        ("mcquest_search_docs", "docs", "Markdown documents"),
+    ):
+        desc = _tool(name).description
+
+        # Root boundary and out-of-root error, not a silently wider search.
+        assert "SCOPE: in-root only" in desc, name
+        assert "never leaves the selected project root" in desc, name
+        assert "out-of-root target is an error rather than a wider search" in desc, name
+
+        # Generated/dependency pruning, including the cache dirs P1 observed.
+        assert ".pytest_cache" in desc, name
+        assert "node_modules" in desc, name
+        assert "MAX_FILE_BYTES (2 MB)" in desc, name
+
+        # Case behaviour.
+        assert "Case-insensitive by default" in desc, name
+        assert "case_sensitive=true" in desc, name
+
+        # Regex mode; a literal string is a valid regex (contract 4.1).
+        assert "a literal string is a valid regex" in desc, name
+
+        # Ordering and paging honesty.
+        assert "deterministic by (relative_path, line)" in desc, name
+        assert "max_results default 50, hard cap 500" in desc, name
+        assert "offset/next_offset" in desc, name
+        assert (
+            "collection_complete=true does NOT mean every row was delivered" in desc
+        ), name
+
+        # What the count actually counts, and the layout-specific default.
+        assert corpus in desc, name
+        assert f"default '{default_path}'" in desc, name
+
+        # Cross-tool and out-of-root redirects.
+        other = (
+            "mcquest_search" if name == "mcquest_search_docs" else "mcquest_search_docs"
+        )
+        assert other in desc, name
+        assert "use the host/client native file tools" in desc, name
+
+    # Markdown-only narrowing is declared on the docs tool specifically.
+    docs_desc = _tool("mcquest_search_docs").description
+    assert "Only Markdown extensions are scanned" in docs_desc
+    assert ".md, .markdown, .mdown, .mkd" in docs_desc
+    assert "basename glob (default '*.md')" in docs_desc
+
+
+def test_search_scope_descriptions_match_actual_pruning_and_confinement(
+    write_file,
+) -> None:
+    """Area 2 behavioural guard: the scope descriptions must not over-claim.
+
+    The descriptions assert that generated/dependency directories are pruned
+    and that out-of-root is an error. This proves both against the real
+    implementation, so prose and behavior cannot drift apart silently.
+    """
+    import pytest
+
+    from mcquest_mcp.tools.docs import search_docs
+    from mcquest_mcp.tools.search import search_text
+
+    write_file("src/app.py", "NEEDLE_HERE\n")
+    write_file(".pytest_cache/v/cache.py", "NEEDLE_HERE\n")
+    write_file("node_modules/pkg/index.js", "NEEDLE_HERE\n")
+    write_file("docs/guide.md", "NEEDLE_HERE\n")
+    write_file(".pytest_cache/notes.md", "NEEDLE_HERE\n")
+
+    # Pruning is real: the only *.py file is the non-ignored one, so the
+    # .pytest_cache .py copy must not be counted.
+    code = search_text("NEEDLE_HERE", path=".", file_pattern="*.py")
+    assert "total: 1" in code, code
+    assert "app.py" in code
+    assert ".pytest_cache" not in code
+    assert "node_modules" not in code
+
+    # Same proof for the docs corpus: only the non-ignored Markdown file.
+    docs = search_docs("NEEDLE_HERE", path=".")
+    assert "total: 1" in docs, docs
+    assert "guide.md" in docs
+    assert ".pytest_cache" not in docs
+
+    # Confinement is real, and matches "out-of-root target is an error".
+    with pytest.raises(ValueError, match="Path escapes MCQuest project root"):
+        search_text("NEEDLE_HERE", path="../outside")
+    with pytest.raises(ValueError, match="Path escapes MCQuest project root"):
+        search_docs("NEEDLE_HERE", path="../outside")
