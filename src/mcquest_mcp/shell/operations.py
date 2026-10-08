@@ -18,6 +18,7 @@ class Operation(str, Enum):
 
     READ_FILE = "READ_FILE"
     READ_JSON = "READ_JSON"
+    READ_SQLITE = "READ_SQLITE"
     SEARCH_LITERAL = "SEARCH_LITERAL"
     SEARCH_REGEX = "SEARCH_REGEX"
     ENUMERATE_FILES = "ENUMERATE_FILES"
@@ -80,6 +81,22 @@ def _is_json_read(text: str) -> bool:
     return structured and key_inspection
 
 
+def _is_sqlite_read(text: str) -> bool:
+    structured = bool(
+        re.search(r"\bsqlite\b|\.db\b|\.sqlite\b", text)
+    )
+    evidence = bool(
+        re.search(
+            r"\bselect\b.*\bfrom\b|\brows?\b|\brecords?\b"
+            r"|\btable\b|\bcolumn\b|\bquery\b",
+            text,
+        )
+    )
+    if re.search(r"\bas\s+(?:plain\s+)?text\b|\braw\s+bytes?\b", text):
+        return False
+    return structured and evidence
+
+
 def classify_operation(intent: str) -> Operation:
     """Classify an intent or command deterministically, with UNKNOWN preserved.
 
@@ -91,6 +108,8 @@ def classify_operation(intent: str) -> Operation:
         return Operation.UNKNOWN
     lowered = text.lower()
 
+    if _is_sqlite_read(lowered):
+        return Operation.READ_SQLITE
     if _is_json_read(lowered):
         return Operation.READ_JSON
     if re.search(r"\b(?:line\s+endings?|line\s+eol|eol|crlf|lf)\b", lowered):

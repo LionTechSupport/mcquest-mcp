@@ -2,7 +2,8 @@
 
 Covers the summary-first bounded output of each adapter, the deterministic
 blocking/insufficient results, the "not executed" labelling, and the A11/A12
-registration invariants at the final count of 34.
+registration invariants at the count pinned by EXPECTED_TOOLS (34 at V1.0,
+35 after V1.1).
 """
 
 from __future__ import annotations
@@ -118,7 +119,7 @@ def test_next_adapter_refuses_a_blind_retry() -> None:
 
 def test_exactly_four_p5_tools_are_registered() -> None:
     names = _live_names()
-    assert len(names) == 34
+    assert len(names) == 35
     for name in P5_TOOLS:
         assert name in names
 

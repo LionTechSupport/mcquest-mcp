@@ -42,11 +42,11 @@ def test_exactly_the_eight_authorized_p3_modules_exist() -> None:
     assert (SHELL / "planner.py").exists()  # added by P5, not by P3
 
 
-def test_the_surface_is_exactly_34_after_p5() -> None:
-    # A11 phased registration: 24 -> 28 (P2) -> 30 (P4) -> 34 (P5).
+def test_the_surface_is_exactly_35_after_v1_1() -> None:
+    # A11 phased registration: 24 -> 28 (P2) -> 30 (P4) -> 34 (P5) -> 35 (V1.1).
     names = sorted(tool.name for tool in asyncio.run(mcp.list_tools()))
     assert names == EXPECTED_TOOLS
-    assert len(names) == 34
+    assert len(names) == 35
     assert P4_TOOLS <= set(names)
     assert P5_TOOLS <= set(names)
 

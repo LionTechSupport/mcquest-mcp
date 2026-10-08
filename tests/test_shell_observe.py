@@ -234,7 +234,7 @@ def test_observe_adapter_applies_invalidation() -> None:
 def test_p4_tools_stay_registered_after_p5() -> None:
     # P5 added plan/prepare/history/next; the P4 pair must stay registered.
     names = sorted(tool.name for tool in asyncio.run(mcp.list_tools()))
-    assert len(names) == 34
+    assert len(names) == 35
     for name in P4_TOOLS:
         assert name in names
     for name in P5_TOOLS:

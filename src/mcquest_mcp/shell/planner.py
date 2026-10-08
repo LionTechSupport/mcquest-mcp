@@ -304,6 +304,12 @@ _REQUIRED_EVIDENCE: dict[Operation, tuple[EvidenceRequirement, ...]] = {
             "a relative path is resolved against the client CWD, never the server's",
         ),
     ),
+    Operation.READ_SQLITE: (
+        EvidenceRequirement(
+            "environment.project_root", Scope.SESSION, "mcquest_shell_environment",
+            "sqlite scope must be anchored to a known project root",
+        ),
+    ),
     Operation.SEARCH_LITERAL: (
         EvidenceRequirement(
             "environment.project_root", Scope.SESSION, "mcquest_shell_environment",
@@ -342,6 +348,7 @@ _REQUIRED_EVIDENCE: dict[Operation, tuple[EvidenceRequirement, ...]] = {
 _OPERATION_TOOL: dict[Operation, str] = {
     Operation.READ_FILE: "mcquest_read_file",
     Operation.READ_JSON: "mcquest_locale_inspect",
+    Operation.READ_SQLITE: "mcquest_sqlite_read",
     Operation.SEARCH_LITERAL: "mcquest_search",
     Operation.SEARCH_REGEX: "mcquest_search",
     Operation.ENUMERATE_FILES: "mcquest_list_files",

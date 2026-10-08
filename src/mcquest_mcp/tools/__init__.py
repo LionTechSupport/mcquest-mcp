@@ -11,6 +11,7 @@ from .strings import find_strings
 from .ui_contract import ui_contract_audit
 from .ui_doc_gap import doc_gap_audit
 from .ui_feature_impact import feature_impact_audit
+from .sqlite_read import sqlite_read
 from .ui_text import find_ui_text
 from .project import project_info
 from .search import search_text
@@ -40,4 +41,5 @@ __all__ = [
     "doc_gap_audit",
     "ui_contract_audit",
     "feature_impact_audit",
+    "sqlite_read",
 ]

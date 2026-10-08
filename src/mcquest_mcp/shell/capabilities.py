@@ -65,6 +65,7 @@ SCOPE_VOCABULARY = frozenset(
 OPERATION_CLASSES: tuple[str, ...] = (
     "READ_FILE",
     "READ_JSON",
+    "READ_SQLITE",
     "SEARCH_LITERAL",
     "SEARCH_REGEX",
     "ENUMERATE_FILES",
@@ -91,6 +92,7 @@ CAPABILITY_CLASSES: tuple[str, ...] = (
     "REFERENCE_READ",
     "STRING_INVENTORY",
     "LOCALE_READ",
+    "SQLITE_READ",
     "COMPONENT_INVENTORY",
     "PATTERN_AUDIT",
     "DIAGNOSTICS",
@@ -314,6 +316,13 @@ _CAPABILITIES_V08: tuple[Capability, ...] = (
         "Lexical component prop-contract audit for drift detection",
         family=_REPO, phase="V0.8", status=_IMPL, execution=_NP,
         scope="repository", intent_tags=("UI_CONTRACT_READ",),
+    ),
+    _row(
+        "mcquest_sqlite_read",
+        "Read structured rows from a project-local SQLite database (read-only SELECT)",
+        family=_REPO, phase="V1.1", status=_IMPL, execution=_NP,
+        scope="repository", intent_tags=("SQLITE_READ", "READ_SQLITE"),
+        prerequisites=_ROOT_REQUIRED,
     ),
 )
 

@@ -30,6 +30,9 @@ surface is now complete; P6 only verifies.
 ``EXPECTED_TOOLS`` remains the single registration authority (decision A12);
 the ``shell/capabilities.py`` registry is metadata only and is drift-tested
 against this list in both directions.
+
+V1.1 Gate 1 (owner-approved ``READ_SQLITE``): ``mcquest_sqlite_read`` is
+registered (34 -> 35) as read-only local SQLite evidence acquisition.
 """
 
 from __future__ import annotations
@@ -63,8 +66,7 @@ EXPECTED_TOOLS = [
     "mcquest_read_file",
     "mcquest_search",
     "mcquest_search_docs",
-    "mcquest_shell_capabilities",
-    "mcquest_shell_context",
+    "mcquest_shell_capabilities",    "mcquest_shell_context",
     "mcquest_shell_environment",
     "mcquest_shell_history",
     "mcquest_shell_next",
@@ -73,15 +75,16 @@ EXPECTED_TOOLS = [
     "mcquest_shell_prepare",
     "mcquest_shell_terminal",
     "mcquest_shell_validate",
+    "mcquest_sqlite_read",
     "mcquest_ui_contract_audit",
 ]
 
 
-def test_exactly_34_tools_remain_registered() -> None:
+def test_exactly_35_tools_remain_registered() -> None:
     tools = asyncio.run(mcp.list_tools())
     names = sorted(tool.name for tool in tools)
     assert names == EXPECTED_TOOLS
-    assert len(names) == 34
+    assert len(names) == 35
 
 
 def test_mcquest_read_file_parameter_descriptions_and_semantics() -> None:

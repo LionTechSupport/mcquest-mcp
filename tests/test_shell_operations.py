@@ -32,6 +32,10 @@ from mcquest_mcp.shell.operations import (
         ("Build the frontend with npm run build", Operation.BUILD),
         ("Install dependencies with npm install", Operation.INSTALL),
         ("Edit src/app.ts and write the new content", Operation.EDIT),
+        # V1.1 owner-approved READ_SQLITE (see Docs/V1.1 Gate 0/Gate 1).
+        ("Read rows from the quizzes table in data.db", Operation.READ_SQLITE),
+        ("SELECT name FROM _collections in the SQLite database", Operation.READ_SQLITE),
+        ("Read data.db as plain text", Operation.READ_FILE),
     ],
 )
 def test_all_frozen_operations_are_reachable(intent: str, expected: Operation) -> None:
@@ -39,13 +43,15 @@ def test_all_frozen_operations_are_reachable(intent: str, expected: Operation) -
 
 
 def test_operation_vocabulary_is_exactly_frozen() -> None:
+    # V1.0 froze 15 classes; V1.1 adds exactly one owner-approved class
+    # (READ_SQLITE) and nothing else may change without explicit approval.
     assert set(OPERATION_CLASSES) == {
-        "READ_FILE", "READ_JSON", "SEARCH_LITERAL", "SEARCH_REGEX",
+        "READ_FILE", "READ_JSON", "READ_SQLITE", "SEARCH_LITERAL", "SEARCH_REGEX",
         "ENUMERATE_FILES", "CHECK_PATH", "CHECK_GIT_STATE", "CHECK_CONFIG",
         "MEASURE_EOL", "RUN_NODE", "RUN_PYTHON", "RUN_TEST", "BUILD",
         "INSTALL", "EDIT",
     }
-    assert len(OPERATION_CLASSES) == 15
+    assert len(OPERATION_CLASSES) == 16
 
 
 def test_structured_json_beats_literal_or_plain_read() -> None:

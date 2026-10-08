@@ -29,6 +29,7 @@ from .tools import (
     read_file,
     search_docs,
     search_text,
+    sqlite_read,
     ui_contract_audit,
 )
 from .tools.shell_env import (
@@ -125,7 +126,10 @@ mcp = MCPServer(
         "locale files for structure, duplicate keys, casefold collisions, and (with an "
         "explicit reference file) MISSING/EXTRA key-path differences; with no reference it "
         "performs structure/collision/duplicate inspection only and never infers a default "
-        "locale. Use mcquest_component_inventory to inventory lexical React "
+        "locale. Use mcquest_sqlite_read when structured records must be read "
+        "from a local SQLite database inside the project root with one "
+        "read-only SELECT statement, instead of temporary Python/shell "
+        "inspection commands. Use mcquest_component_inventory to inventory lexical React "
         "component candidates (function/arrow/class, path:line:Name + kind only) "
         "in .js/.jsx/.ts/.tsx sources; its results are lexical candidates, not "
         "verified components, and a zero result does not prove that no "
@@ -382,6 +386,23 @@ def mcquest_locale_inspect(
         file_pattern=file_pattern,
         max_results=max_results,
         offset=offset,
+    )
+
+
+
+@mcp.tool()
+def mcquest_sqlite_read(
+    database: Annotated[str, Field(description="Project-relative path to the SQLite database file, e.g. 'data/app.db'. Must resolve inside the project root; file: URIs are rejected.")],
+    query: Annotated[str, Field(description="One read-only SELECT statement (read-only WITH...SELECT included). Mutations, PRAGMA, multiple statements, and named parameters are rejected; use ? with parameters.")],
+    parameters: Annotated[list | None, Field(description="Optional bound values for ? placeholders, e.g. ['user@example.com']. Never interpolated into SQL. Defaults to none.")] = None,
+    max_rows: Annotated[int, Field(description="Maximum rows to return. Defaults to 50 (hard cap 500).")] = 50,
+) -> str:
+    """READ ONLY. Read structured rows from a project-local SQLite database with one read-only SELECT statement. Use this when structured records must be read from a local SQLite database within the permitted project boundary, instead of constructing temporary Python/shell inspection commands. The server opens its own read-only connection; only SELECT (and read-only WITH...SELECT) is accepted; values are bound, never interpolated; BLOBs return as base64 envelopes. Returns columns, rows, and honest truncated/collection_complete metadata. Shell remains correct for starting/stopping services, migrations, backups, writes, repair, live HTTP diagnostics, and arbitrary process execution."""
+    return sqlite_read(
+        database=database,
+        query=query,
+        parameters=parameters,
+        max_rows=max_rows,
     )
 
 

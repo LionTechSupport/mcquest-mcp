@@ -60,10 +60,10 @@ def test_registry_equals_live_server_listing() -> None:
 
 
 def test_registry_totals_match_the_phase_plan() -> None:
-    # A11 phased registration: 24 -> 28 (P2) -> 30 (P4) -> 34 (P5).
+    # A11 phased registration: 24 -> 28 (P2) -> 30 (P4) -> 34 (P5) -> 35 (V1.1).
     implemented, planned = registry.capability_totals()
-    assert (implemented, planned) == (34, 0)
-    assert len(registry.CAPABILITIES) == 34
+    assert (implemented, planned) == (35, 0)
+    assert len(registry.CAPABILITIES) == 35
     assert len(registry.PLANNED_CAPABILITIES) == 0
 
 
@@ -85,7 +85,8 @@ def test_families_distinguish_v08_and_v09_capabilities() -> None:
         for row in registry.CAPABILITIES
         if row.family is registry.CapabilityFamily.SHELL_INTELLIGENCE
     ]
-    assert len(repo_rows) == 24
+    # V0.8 = 24 repository rows; V1.1 Gate 1 adds mcquest_sqlite_read (25).
+    assert len(repo_rows) == 25
     assert len(shell_rows) == 10
     assert set(row.name for row in shell_rows) == (
         set(P2_TOOLS) | set(P4_TOOLS) | set(P5_TOOLS)
@@ -187,7 +188,7 @@ def test_paging_is_deterministic_and_bounded() -> None:
     first = registry.capability_page()
     second = registry.capability_page()
     assert first == second
-    assert (first.total, first.returned, first.offset) == (34, 10, 0)
+    assert (first.total, first.returned, first.offset) == (35, 10, 0)
     assert first.has_more is True
     assert first.next_offset == 10
 
@@ -216,7 +217,7 @@ def test_paging_reaches_every_row_exactly_once() -> None:
         if row.family is registry.CapabilityFamily.SHELL_INTELLIGENCE
     ] + [row.name for row in registry.PLANNED_CAPABILITIES]
     assert seen == expected
-    assert len(set(seen)) == 34
+    assert len(set(seen)) == 35
 
 
 def test_the_two_p4_tools_are_implemented_shell_capabilities() -> None:
@@ -277,7 +278,7 @@ def test_rendered_sections_label_implemented_and_planned_distinctly() -> None:
     # yields no PLANNED section at all: nothing may be advertised as planned,
     # registered, or executable any more.
     assert registry.PLANNED_CAPABILITIES == ()
-    past_end = registry.capability_page(offset=34, max_results=10)
+    past_end = registry.capability_page(offset=35, max_results=10)
     assert past_end.sections == ()
     assert past_end.returned == 0
     assert past_end.has_more is False

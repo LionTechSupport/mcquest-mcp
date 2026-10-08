@@ -276,10 +276,10 @@ def test_context_preserves_source_and_trust_for_declared_facts() -> None:
 def test_capabilities_tool_summary_names_the_authority() -> None:
     output = shell_capabilities()
     _assert_bounded(output)
-    assert "implemented: 34" in output
+    assert "implemented: 35" in output
     assert "planned: 0" in output
     assert "authority: EXPECTED_TOOLS" in output
-    assert "total: 34" in output
+    assert "total: 35" in output
     assert "has_more: true" in output
     assert "next_offset: 10" in output
     assert "collection_complete: true" in output
@@ -305,8 +305,8 @@ def test_capabilities_tool_pages_cover_implemented_and_planned_rows() -> None:
                 if line.startswith("next_offset: ")
             )
         )
-    assert len(seen) == 34
-    assert len(set(seen)) == 34
+    assert len(seen) == 35
+    assert len(set(seen)) == 35
     assert "mcquest_shell_environment" in seen
     assert "mcquest_shell_validate" in seen  # implemented at P4
     assert "mcquest_shell_observe" in seen  # implemented at P4
@@ -317,7 +317,7 @@ def test_capabilities_tool_pages_cover_implemented_and_planned_rows() -> None:
 def test_capabilities_tool_advertises_nothing_as_planned_after_p5() -> None:
     # P5 completed the approved ten-tool surface: no row may still be rendered
     # under the PLANNED / NOT EXECUTABLE heading.
-    output = shell_capabilities(offset=34, max_results=10)
+    output = shell_capabilities(offset=35, max_results=10)
     assert "PLANNED - NOT REGISTERED / NOT IMPLEMENTED / NOT EXECUTABLE" not in output
     assert "status=PLANNED" not in output
     assert "has_more: false" in output
